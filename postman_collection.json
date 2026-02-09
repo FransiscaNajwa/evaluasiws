@@ -1,0 +1,197 @@
+{
+  "info": {
+    "name": "TPK Nilam Evaluasi WS API",
+    "description": "REST API for TPK Nilam Work Shift Evaluation System",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "1. Test Connection",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost/evaluasi_ws/index.php?request=test",
+          "protocol": "http",
+          "host": ["localhost"],
+          "path": ["evaluasi_ws", "index.php"],
+          "query": [
+            {
+              "key": "request",
+              "value": "test"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "2. Get All Evaluasi",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost/api_php/index.php?request=evaluasi",
+          "protocol": "http",
+          "host": ["localhost"],
+          "path": ["api_php", "index.php"],
+          "query": [
+            {
+              "key": "request",
+              "value": "evaluasi"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "3. Get Evaluasi by ID",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost/api_php/index.php?request=evaluasi&id=1",
+          "protocol": "http",
+          "host": ["localhost"],
+          "path": ["api_php", "index.php"],
+          "query": [
+            {
+              "key": "request",
+              "value": "evaluasi"
+            },
+            {
+              "key": "id",
+              "value": "1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "4. Create Evaluasi",
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"tanggal\": \"09/02/2026\",\n  \"shift\": \"Shift 1\",\n  \"kapal\": \"MV New Test Ship\",\n  \"pelayaran\": \"Pelayaran 1\",\n  \"target_bongkar\": 650,\n  \"realisasi_bongkar\": 615,\n  \"target_muat\": 690,\n  \"realisasi_muat\": 680,\n  \"persen_bongkar\": 94.62,\n  \"persen_muat\": 98.55,\n  \"keterangan\": \"Created from Postman\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost/api_php/index.php?request=evaluasi",
+          "protocol": "http",
+          "host": ["localhost"],
+          "path": ["api_php", "index.php"],
+          "query": [
+            {
+              "key": "request",
+              "value": "evaluasi"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "5. Update Evaluasi",
+      "request": {
+        "method": "PUT",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"tanggal\": \"09/02/2026\",\n  \"shift\": \"Shift 2\",\n  \"kapal\": \"MV Updated Ship\",\n  \"pelayaran\": \"Pelayaran 2\",\n  \"target_bongkar\": 650,\n  \"realisasi_bongkar\": 620,\n  \"target_muat\": 690,\n  \"realisasi_muat\": 685,\n  \"persen_bongkar\": 95.38,\n  \"persen_muat\": 99.28,\n  \"keterangan\": \"Updated from Postman\"\n}"
+        },
+        "url": {
+          "raw": "http://localhost/api_php/index.php?request=evaluasi&id=1",
+          "protocol": "http",
+          "host": ["localhost"],
+          "path": ["api_php", "index.php"],
+          "query": [
+            {
+              "key": "request",
+              "value": "evaluasi"
+            },
+            {
+              "key": "id",
+              "value": "1"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "6. Delete Evaluasi",
+      "request": {
+        "method": "DELETE",
+        "header": [],
+        "url": {
+          "raw": "http://localhost/api_php/index.php?request=evaluasi&id=8",
+          "protocol": "http",
+          "host": ["localhost"],
+          "path": ["api_php", "index.php"],
+          "query": [
+            {
+              "key": "request",
+              "value": "evaluasi"
+            },
+            {
+              "key": "id",
+              "value": "8",
+              "description": "ID to delete"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "7. Get Statistics",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost/api_php/index.php?request=statistics",
+          "protocol": "http",
+          "host": ["localhost"],
+          "path": ["api_php", "index.php"],
+          "query": [
+            {
+              "key": "request",
+              "value": "statistics"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "8. Search Evaluasi",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost/api_php/index.php?request=search&q=ocean",
+          "protocol": "http",
+          "host": ["localhost"],
+          "path": ["api_php", "index.php"],
+          "query": [
+            {
+              "key": "request",
+              "value": "search"
+            },
+            {
+              "key": "q",
+              "value": "ocean",
+              "description": "Search query"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,59 @@
+name: evaluasiws
+description: TPK Nilam Work Shift Evaluation System
+
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  
+  # UI & Charts
+  fl_chart: ^0.66.0
+  
+  # Date formatting
+  intl: ^0.18.1
+  
+  # Database
+  sqflite: ^2.3.0
+  path: ^1.8.3
+  
+  # Export PDF and Excel
+  pdf: ^3.10.0
+  printing: ^5.10.0
+  excel: ^2.1.0
+  
+  # Icons
+  cupertino_icons: ^1.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  
+  # Fonts - Commented out (download fonts to enable)
+  # Download from:
+  # Outfit: https://fonts.google.com/specimen/Outfit
+  # JetBrains Mono: https://fonts.google.com/specimen/JetBrains+Mono
+  # 
+  # fonts:
+  #   - family: Outfit
+  #     fonts:
+  #       - asset: fonts/Outfit-Regular.ttf
+  #       - asset: fonts/Outfit-Bold.ttf
+  #         weight: 700
+  #       - asset: fonts/Outfit-ExtraBold.ttf
+  #         weight: 800
+  #   
+  #   - family: JetBrains Mono
+  #     fonts:
+  #       - asset: fonts/JetBrainsMono-Regular.ttf
+  #       - asset: fonts/JetBrainsMono-Bold.ttf
+  #         weight: 700

@@ -7,6 +7,9 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 import 'package:excel/excel.dart' as excel_pkg hide Border;
+import 'database/database_helper.dart';
+import 'models/target_data.dart';
+import 'models/realisasi_data.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -109,6 +112,12 @@ class _MainPageState extends State<MainPage> {
   String _chartSelectedBulan = 'Januari';
   String _chartSelectedTahun = '2024';
 
+  // Database
+  final DatabaseHelper _dbHelper = DatabaseHelper();
+  List<TargetData> _targetDataList = [];
+  List<RealisasiData> _realisasiDataList = [];
+  bool _isLoadingData = false;
+
   @override
   void initState() {
     super.initState();
@@ -117,6 +126,206 @@ class _MainPageState extends State<MainPage> {
         _currentDateTime = DateTime.now();
       });
     });
+    _loadDatabaseData();
+  }
+
+  // Load data from database
+  Future<void> _loadDatabaseData() async {
+    setState(() {
+      _isLoadingData = true;
+    });
+
+    try {
+      final targetData = await _dbHelper.getAllTargetData();
+      final realisasiData = await _dbHelper.getAllRealisasiData();
+
+      setState(() {
+        _targetDataList = targetData;
+        _realisasiDataList = realisasiData;
+        _isLoadingData = false;
+      });
+    } catch (e) {
+      print('Error loading data: $e');
+      setState(() {
+        _isLoadingData = false;
+      });
+    }
+  }
+
+  // Save Target Data
+  Future<void> _saveTargetData() async {
+    // Validate inputs
+    if (_targetBongkarController.text.isEmpty ||
+        _targetMuatController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Mohon isi semua field Target Bongkar dan Muat'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+      return;
+    }
+
+    try {
+      // Calculate BT
+      final duration = _targetWaktuDeparture.difference(_targetWaktuBerthing);
+      final hours = duration.inHours;
+      final minutes = duration.inMinutes.remainder(60);
+      final seconds = duration.inSeconds.remainder(60);
+      final btFormatted =
+          '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+
+      final targetData = TargetData(
+        pelayaran: _selectedPelayaranTarget,
+        kodeWS: _targetKodeWSController.text,
+        periode: _selectedPeriodeTarget,
+        waktuBerthing: _targetWaktuBerthing.toIso8601String(),
+        waktuDeparture: _targetWaktuDeparture.toIso8601String(),
+        berthingTime: btFormatted,
+        targetBongkar: int.parse(_targetBongkarController.text),
+        targetMuat: int.parse(_targetMuatController.text),
+        createdAt: DateTime.now().toIso8601String(),
+      );
+
+      await _dbHelper.insertTargetData(targetData);
+
+      // Clear form
+      _targetKodeWSController.clear();
+      _targetBongkarController.clear();
+      _targetMuatController.clear();
+
+      // Reload data
+      await _loadDatabaseData();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Target berhasil disimpan!'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+    } catch (e) {
+      print('Error saving target: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+    }
+  }
+
+  // Save Realisasi Data
+  Future<void> _saveRealisasiData() async {
+    // Validate inputs
+    if (_realisasiKodeWSController.text.isEmpty ||
+        _realisasiNamaKapalController.text.isEmpty ||
+        _realisasiBongkarController.text.isEmpty ||
+        _realisasiMuatController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Mohon isi semua field yang diperlukan'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+      return;
+    }
+
+    try {
+      // Calculate BT
+      final duration =
+          _realisasiWaktuDeparture.difference(_realisasiWaktuBerthing);
+      final hours = duration.inHours;
+      final minutes = duration.inMinutes.remainder(60);
+      final seconds = duration.inSeconds.remainder(60);
+      final btFormatted =
+          '${hours.toString().padLeft(2, '0')}:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+
+      final realisasiData = RealisasiData(
+        pelayaran: _selectedPelayaranRealisasi,
+        kodeWS: _realisasiKodeWSController.text,
+        namaKapal: _realisasiNamaKapalController.text,
+        periode: _selectedPeriodeRealisasi,
+        waktuArrival: _realisasiWaktuArrival.toIso8601String(),
+        waktuBerthing: _realisasiWaktuBerthing.toIso8601String(),
+        waktuDeparture: _realisasiWaktuDeparture.toIso8601String(),
+        berthingTime: btFormatted,
+        realisasiBongkar: int.parse(_realisasiBongkarController.text),
+        realisasiMuat: int.parse(_realisasiMuatController.text),
+        createdAt: DateTime.now().toIso8601String(),
+      );
+
+      await _dbHelper.insertRealisasiData(realisasiData);
+
+      // Clear form
+      _realisasiKodeWSController.clear();
+      _realisasiNamaKapalController.clear();
+      _realisasiBongkarController.clear();
+      _realisasiMuatController.clear();
+
+      // Reload data
+      await _loadDatabaseData();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Realisasi berhasil disimpan!'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+    } catch (e) {
+      print('Error saving realisasi: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+    }
+  }
+
+  // Delete Target Data
+  Future<void> _deleteTargetData(int id) async {
+    try {
+      await _dbHelper.deleteTargetData(id);
+      await _loadDatabaseData();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Data target berhasil dihapus!'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+    } catch (e) {
+      print('Error deleting target: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+    }
+  }
+
+  // Delete Realisasi Data
+  Future<void> _deleteRealisasiData(int id) async {
+    try {
+      await _dbHelper.deleteRealisasiData(id);
+      await _loadDatabaseData();
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Data realisasi berhasil dihapus!'),
+          backgroundColor: AppColors.success,
+        ),
+      );
+    } catch (e) {
+      print('Error deleting realisasi: $e');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
+    }
   }
 
   @override
@@ -591,7 +800,7 @@ class _MainPageState extends State<MainPage> {
                   ),
                 ),
                 const SizedBox(height: 20),
-                _buildSaveButton('Simpan Target'),
+                _buildSaveButton('Simpan Target', _saveTargetData),
               ],
             ),
           ),
@@ -744,7 +953,7 @@ class _MainPageState extends State<MainPage> {
                   ),
                 ),
                 const SizedBox(height: 20),
-                _buildSaveButton('Simpan Realisasi'),
+                _buildSaveButton('Simpan Realisasi', _saveRealisasiData),
               ],
             ),
           ),
@@ -1552,6 +1761,28 @@ class _MainPageState extends State<MainPage> {
   }
 
   Widget _buildTargetDataTable() {
+    if (_isLoadingData) {
+      return const Center(
+        child: CircularProgressIndicator(color: AppColors.secondary),
+      );
+    }
+
+    if (_targetDataList.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32.0),
+          child: Text(
+            'Belum ada data target.\nSilakan input data baru.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 14,
+            ),
+          ),
+        ),
+      );
+    }
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: DataTable(
@@ -1570,7 +1801,6 @@ class _MainPageState extends State<MainPage> {
           DataColumn(label: Text('NO')),
           DataColumn(label: Text('PELAYARAN')),
           DataColumn(label: Text('WS')),
-          DataColumn(label: Text('KAPAL')),
           DataColumn(label: Text('WEEK')),
           DataColumn(label: Text('TB')),
           DataColumn(label: Text('TD')),
@@ -1578,73 +1808,55 @@ class _MainPageState extends State<MainPage> {
           DataColumn(label: Text('TARGET (B/M)')),
           DataColumn(label: Text('AKSI')),
         ],
-        rows: [
-          _buildTargetDataTableRow(
-              no: '1',
-              pelayaran: 'MERATUS',
-              ws: 'MMTK',
-              kapal: 'MERATUS BATAM',
-              week: '1',
-              tb: '28/12 03:30',
-              td: '28/12 15:25',
-              bt: '11:55',
-              target: '512 / 0'),
-          _buildTargetDataTableRow(
-              no: '2',
-              pelayaran: 'MERATUS',
-              ws: 'MMTK',
-              kapal: 'MERATUS LABUAN BAJO',
-              week: '2',
-              tb: '04/01 12:23',
-              td: '05/01 11:42',
-              bt: '23:19',
-              target: '401 / 512'),
-          _buildTargetDataTableRow(
-              no: '3',
-              pelayaran: 'MERATUS',
-              ws: 'MMTK',
-              kapal: 'MERATUS LARANTUKA',
-              week: '3',
-              tb: '11/01 18:18',
-              td: '12/01 12:34',
-              bt: '18:16',
-              target: '409 / 391'),
-          _buildTargetDataTableRow(
-              no: '4',
-              pelayaran: 'MERATUS',
-              ws: 'MPMI',
-              kapal: 'MERATUS GORONTALO',
-              week: '1',
-              tb: '28/12 22:19',
-              td: '29/12 18:15',
-              bt: '19:56',
-              target: '324 / 348'),
-          _buildTargetDataTableRow(
-              no: '5',
-              pelayaran: 'SPIL',
-              ws: 'SKD1',
-              kapal: 'SPIL RETNO',
-              week: '1',
-              tb: '27/12 18:59',
-              td: '28/12 15:20',
-              bt: '20:21',
-              target: '400 / 430'),
-          _buildTargetDataTableRow(
-              no: '6',
-              pelayaran: 'SPIL',
-              ws: 'SSR1',
-              kapal: 'BALI AYU',
-              week: '1',
-              tb: '29/12 01:18',
-              td: '29/12 06:41',
-              bt: '05:23',
-              target: '245 / 0'),
-        ],
+        rows: _targetDataList.asMap().entries.map((entry) {
+          int index = entry.key;
+          TargetData data = entry.value;
+
+          // Format DateTime
+          final tbDate = DateTime.parse(data.waktuBerthing);
+          final tdDate = DateTime.parse(data.waktuDeparture);
+          final tbFormatted = DateFormat('dd/MM HH:mm').format(tbDate);
+          final tdFormatted = DateFormat('dd/MM HH:mm').format(tdDate);
+
+          return _buildTargetDataTableRow(
+            no: '${index + 1}',
+            pelayaran: data.pelayaran,
+            ws: data.kodeWS,
+            week: data.periode,
+            tb: tbFormatted,
+            td: tdFormatted,
+            bt: data.berthingTime,
+            target: '${data.targetBongkar} / ${data.targetMuat}',
+            onDelete: () => _deleteTargetData(data.id!),
+          );
+        }).toList(),
       ),
     );
   }
 
   Widget _buildRealisasiDataTable() {
+    if (_isLoadingData) {
+      return const Center(
+        child: CircularProgressIndicator(color: AppColors.secondary),
+      );
+    }
+
+    if (_realisasiDataList.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32.0),
+          child: Text(
+            'Belum ada data realisasi.\nSilakan input data baru.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 14,
+            ),
+          ),
+        ),
+      );
+    }
+
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: DataTable(
@@ -1672,74 +1884,32 @@ class _MainPageState extends State<MainPage> {
           DataColumn(label: Text('REALISASI (B/M)')),
           DataColumn(label: Text('AKSI')),
         ],
-        rows: [
-          _buildRealisasiDataTableRow(
-              no: '1',
-              pelayaran: 'MERATUS',
-              ws: 'MMTK',
-              kapal: 'MERATUS BATAM',
-              week: '1',
-              ta: '28/12 02:40',
-              tb: '28/12 03:30',
-              td: '28/12 15:25',
-              bt: '11:55',
-              realisasi: '512 / 0'),
-          _buildRealisasiDataTableRow(
-              no: '2',
-              pelayaran: 'MERATUS',
-              ws: 'MMTK',
-              kapal: 'MERATUS LABUAN BAJO',
-              week: '2',
-              ta: '04/01 11:10',
-              tb: '04/01 12:23',
-              td: '05/01 11:42',
-              bt: '23:19',
-              realisasi: '401 / 512'),
-          _buildRealisasiDataTableRow(
-              no: '3',
-              pelayaran: 'MERATUS',
-              ws: 'MMTK',
-              kapal: 'MERATUS LARANTUKA',
-              week: '3',
-              ta: '11/01 17:58',
-              tb: '11/01 18:18',
-              td: '12/01 12:34',
-              bt: '18:16',
-              realisasi: '409 / 391'),
-          _buildRealisasiDataTableRow(
-              no: '4',
-              pelayaran: 'MERATUS',
-              ws: 'MPMI',
-              kapal: 'MERATUS GORONTALO',
-              week: '1',
-              ta: '28/12 21:27',
-              tb: '28/12 22:19',
-              td: '29/12 18:15',
-              bt: '19:56',
-              realisasi: '324 / 348'),
-          _buildRealisasiDataTableRow(
-              no: '5',
-              pelayaran: 'SPIL',
-              ws: 'SKD1',
-              kapal: 'SPIL RETNO',
-              week: '1',
-              ta: '27/12 18:52',
-              tb: '27/12 18:59',
-              td: '28/12 15:20',
-              bt: '20:21',
-              realisasi: '400 / 430'),
-          _buildRealisasiDataTableRow(
-              no: '6',
-              pelayaran: 'SPIL',
-              ws: 'SSR1',
-              kapal: 'BALI AYU',
-              week: '1',
-              ta: '29/12 01:18',
-              tb: '29/12 01:18',
-              td: '29/12 06:41',
-              bt: '05:23',
-              realisasi: '245 / 0'),
-        ],
+        rows: _realisasiDataList.asMap().entries.map((entry) {
+          int index = entry.key;
+          RealisasiData data = entry.value;
+
+          // Format DateTime
+          final taDate = DateTime.parse(data.waktuArrival);
+          final tbDate = DateTime.parse(data.waktuBerthing);
+          final tdDate = DateTime.parse(data.waktuDeparture);
+          final taFormatted = DateFormat('dd/MM HH:mm').format(taDate);
+          final tbFormatted = DateFormat('dd/MM HH:mm').format(tbDate);
+          final tdFormatted = DateFormat('dd/MM HH:mm').format(tdDate);
+
+          return _buildRealisasiDataTableRow(
+            no: '${index + 1}',
+            pelayaran: data.pelayaran,
+            ws: data.kodeWS,
+            kapal: data.namaKapal,
+            week: data.periode,
+            ta: taFormatted,
+            tb: tbFormatted,
+            td: tdFormatted,
+            bt: data.berthingTime,
+            realisasi: '${data.realisasiBongkar} / ${data.realisasiMuat}',
+            onDelete: () => _deleteRealisasiData(data.id!),
+          );
+        }).toList(),
       ),
     );
   }
@@ -1748,12 +1918,12 @@ class _MainPageState extends State<MainPage> {
     required String no,
     required String pelayaran,
     required String ws,
-    required String kapal,
     required String week,
     required String tb,
     required String td,
     required String bt,
     required String target,
+    required VoidCallback onDelete,
   }) {
     return DataRow(cells: [
       DataCell(Text(no)),
@@ -1763,7 +1933,6 @@ class _MainPageState extends State<MainPage> {
       DataCell(Text(ws,
           style: const TextStyle(
               color: AppColors.accent, fontWeight: FontWeight.w600))),
-      DataCell(Text(kapal)),
       DataCell(Text(week)),
       DataCell(Text(tb,
           style: const TextStyle(fontSize: 11, fontFamily: 'JetBrains Mono'))),
@@ -1776,8 +1945,15 @@ class _MainPageState extends State<MainPage> {
       DataCell(Row(
         children: [
           InkWell(
-            onTap: () => _showEditDialog(
-                kapal: kapal, ws: ws, pelayaran: pelayaran, week: week),
+            onTap: () {
+              // TODO: Implement edit functionality
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Edit functionality coming soon'),
+                  backgroundColor: AppColors.secondary,
+                ),
+              );
+            },
             child: const Text('Edit',
                 style: TextStyle(
                     color: AppColors.secondary,
@@ -1786,7 +1962,7 @@ class _MainPageState extends State<MainPage> {
           ),
           const SizedBox(width: 12),
           InkWell(
-            onTap: () => _showDeleteConfirmation(kapal),
+            onTap: onDelete,
             child: const Text('Hapus',
                 style: TextStyle(
                     color: AppColors.danger,
@@ -1809,6 +1985,7 @@ class _MainPageState extends State<MainPage> {
     required String td,
     required String bt,
     required String realisasi,
+    required VoidCallback onDelete,
   }) {
     return DataRow(cells: [
       DataCell(Text(no)),
@@ -1833,8 +2010,15 @@ class _MainPageState extends State<MainPage> {
       DataCell(Row(
         children: [
           InkWell(
-            onTap: () => _showEditDialog(
-                kapal: kapal, ws: ws, pelayaran: pelayaran, week: week),
+            onTap: () {
+              // TODO: Implement edit functionality
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Edit functionality coming soon'),
+                  backgroundColor: AppColors.secondary,
+                ),
+              );
+            },
             child: const Text('Edit',
                 style: TextStyle(
                     color: AppColors.secondary,
@@ -1843,7 +2027,7 @@ class _MainPageState extends State<MainPage> {
           ),
           const SizedBox(width: 12),
           InkWell(
-            onTap: () => _showDeleteConfirmation(kapal),
+            onTap: onDelete,
             child: const Text('Hapus',
                 style: TextStyle(
                     color: AppColors.danger,
@@ -2154,7 +2338,7 @@ class _MainPageState extends State<MainPage> {
     );
   }
 
-  Widget _buildSaveButton(String text) {
+  Widget _buildSaveButton(String text, VoidCallback onPressed) {
     return SizedBox(
       width: double.infinity,
       child: ElevatedButton(
@@ -2165,14 +2349,7 @@ class _MainPageState extends State<MainPage> {
             borderRadius: BorderRadius.circular(8),
           ),
         ),
-        onPressed: () {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(text),
-              backgroundColor: AppColors.success,
-            ),
-          );
-        },
+        onPressed: onPressed,
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [

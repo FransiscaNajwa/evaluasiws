@@ -1,12 +1,12 @@
-import 'package:sqflite/sqflite.dart';
-import 'package:path/path.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 import '../models/evaluasi_data.dart';
 import '../models/target_data.dart';
 import '../models/realisasi_data.dart';
 
 class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
-  static Database? _database;
+  static late SharedPreferences _prefs;
 
   factory DatabaseHelper() {
     return _instance;
@@ -14,438 +14,481 @@ class DatabaseHelper {
 
   DatabaseHelper._internal();
 
-  Future<Database> get database async {
-    if (_database != null) return _database!;
-    _database = await _initDatabase();
-    return _database!;
+  Future<void> initialize() async {
+    _prefs = await SharedPreferences.getInstance();
+    await _prefs.setBool('initialized', true);
+    print('SharedPreferences initialized successfully');
   }
 
-  Future<Database> _initDatabase() async {
-    String path = join(await getDatabasesPath(), 'evaluasi_ws.db');
-    return await openDatabase(
-      path,
-      version: 2, // Increment version for schema changes
-      onCreate: _onCreate,
-      onUpgrade: _onUpgrade,
-    );
-  }
-
-  Future<void> _onCreate(Database db, int version) async {
-    // Original evaluasi table (for backward compatibility)
-    await db.execute('''
-      CREATE TABLE evaluasi(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tanggal TEXT NOT NULL,
-        shift TEXT NOT NULL,
-        kapal TEXT NOT NULL,
-        pelayaran TEXT NOT NULL,
-        targetBongkar INTEGER NOT NULL,
-        realisasiBongkar INTEGER NOT NULL,
-        targetMuat INTEGER NOT NULL,
-        realisasiMuat INTEGER NOT NULL,
-        persenBongkar REAL NOT NULL,
-        persenMuat REAL NOT NULL,
-        keterangan TEXT NOT NULL
-      )
-    ''');
-
-    // New target_data table
-    await db.execute('''
-      CREATE TABLE target_data(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        pelayaran TEXT NOT NULL,
-        kodeWS TEXT NOT NULL,
-        periode TEXT NOT NULL,
-        waktuBerthing TEXT NOT NULL,
-        waktuDeparture TEXT NOT NULL,
-        berthingTime TEXT NOT NULL,
-        targetBongkar INTEGER NOT NULL,
-        targetMuat INTEGER NOT NULL,
-        createdAt TEXT NOT NULL
-      )
-    ''');
-
-    // New realisasi_data table
-    await db.execute('''
-      CREATE TABLE realisasi_data(
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        pelayaran TEXT NOT NULL,
-        kodeWS TEXT NOT NULL,
-        namaKapal TEXT NOT NULL,
-        periode TEXT NOT NULL,
-        waktuArrival TEXT NOT NULL,
-        waktuBerthing TEXT NOT NULL,
-        waktuDeparture TEXT NOT NULL,
-        berthingTime TEXT NOT NULL,
-        realisasiBongkar INTEGER NOT NULL,
-        realisasiMuat INTEGER NOT NULL,
-        createdAt TEXT NOT NULL
-      )
-    ''');
-
-    // Insert sample data for old table (backward compatibility)
-    await db.insert('evaluasi', {
-      'tanggal': '10/02/2026',
-      'shift': 'Shift 1',
-      'kapal': 'MV Ocean Star',
-      'pelayaran': 'Pelayaran 1',
-      'targetBongkar': 650,
-      'realisasiBongkar': 615,
-      'targetMuat': 690,
-      'realisasiMuat': 680,
-      'persenBongkar': 94.6,
-      'persenMuat': 98.6,
-      'keterangan': 'Normal',
-    });
-
-    await db.insert('evaluasi', {
-      'tanggal': '10/02/2026',
-      'shift': 'Shift 2',
-      'kapal': 'MV Pacific Wave',
-      'pelayaran': 'Pelayaran 2',
-      'targetBongkar': 650,
-      'realisasiBongkar': 580,
-      'targetMuat': 690,
-      'realisasiMuat': 645,
-      'persenBongkar': 89.2,
-      'persenMuat': 93.5,
-      'keterangan': 'Cuaca buruk',
-    });
-  }
-
-  Future<void> _onUpgrade(Database db, int oldVersion, int newVersion) async {
-    if (oldVersion < 2) {
-      // Create new tables if upgrading from version 1
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS target_data(
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          pelayaran TEXT NOT NULL,
-          kodeWS TEXT NOT NULL,
-          periode TEXT NOT NULL,
-          waktuBerthing TEXT NOT NULL,
-          waktuDeparture TEXT NOT NULL,
-          berthingTime TEXT NOT NULL,
-          targetBongkar INTEGER NOT NULL,
-          targetMuat INTEGER NOT NULL,
-          createdAt TEXT NOT NULL
-        )
-      ''');
-
-      await db.execute('''
-        CREATE TABLE IF NOT EXISTS realisasi_data(
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          pelayaran TEXT NOT NULL,
-          kodeWS TEXT NOT NULL,
-          namaKapal TEXT NOT NULL,
-          periode TEXT NOT NULL,
-          waktuArrival TEXT NOT NULL,
-          waktuBerthing TEXT NOT NULL,
-          waktuDeparture TEXT NOT NULL,
-          berthingTime TEXT NOT NULL,
-          realisasiBongkar INTEGER NOT NULL,
-          realisasiMuat INTEGER NOT NULL,
-          createdAt TEXT NOT NULL
-        )
-      ''');
+  // Helper method to ensure initialization
+  void _ensureInitialized() {
+    if (!(_prefs.getBool('initialized') ?? false)) {
+      print(
+          'Warning: SharedPreferences not initialized. Call initialize() in main()');
     }
   }
 
-  // Insert data
+  // ======================== EVALUASI DATA METHODS ========================
+
+  // Insert evaluasi data
   Future<int> insertEvaluasi(EvaluasiData evaluasi) async {
-    Database db = await database;
-    return await db.insert('evaluasi', evaluasi.toMap());
+    _ensureInitialized();
+    try {
+      List<EvaluasiData> all = await getAllEvaluasi();
+      int maxId = all.isEmpty
+          ? 0
+          : all.map((e) => e.id ?? 0).reduce((a, b) => a > b ? a : b);
+      int newId = maxId + 1;
+
+      List<String> evaluasiList = _prefs.getStringList('evaluasi_list') ?? [];
+      Map<String, dynamic> dataMap = evaluasi.toMap();
+      dataMap['id'] = newId;
+      evaluasiList.add(jsonEncode(dataMap));
+      await _prefs.setStringList('evaluasi_list', evaluasiList);
+
+      return newId;
+    } catch (e) {
+      print('Error inserting evaluasi: $e');
+      return 0;
+    }
   }
 
-  // Get all data
+  // Get all evaluasi data
   Future<List<EvaluasiData>> getAllEvaluasi() async {
-    Database db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'evaluasi',
-      orderBy: 'id DESC',
-    );
-    return List.generate(maps.length, (i) {
-      return EvaluasiData.fromMap(maps[i]);
-    });
+    _ensureInitialized();
+    try {
+      List<String> evaluasiList = _prefs.getStringList('evaluasi_list') ?? [];
+      return List.generate(evaluasiList.length, (i) {
+        return EvaluasiData.fromMap(jsonDecode(evaluasiList[i]));
+      });
+    } catch (e) {
+      print('Error getting all evaluasi: $e');
+      return [];
+    }
   }
 
-  // Search data
+  // Search evaluasi data
   Future<List<EvaluasiData>> searchEvaluasi(String query) async {
-    Database db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'evaluasi',
-      where: 'kapal LIKE ? OR tanggal LIKE ?',
-      whereArgs: ['%$query%', '%$query%'],
-      orderBy: 'id DESC',
-    );
-    return List.generate(maps.length, (i) {
-      return EvaluasiData.fromMap(maps[i]);
-    });
+    _ensureInitialized();
+    try {
+      List<EvaluasiData> all = await getAllEvaluasi();
+      return all.where((evaluasi) {
+        return evaluasi.kapal.toLowerCase().contains(query.toLowerCase()) ||
+            evaluasi.tanggal.toLowerCase().contains(query.toLowerCase());
+      }).toList();
+    } catch (e) {
+      print('Error searching evaluasi: $e');
+      return [];
+    }
   }
 
-  // Update data
+  // Update evaluasi data
   Future<int> updateEvaluasi(EvaluasiData evaluasi) async {
-    Database db = await database;
-    return await db.update(
-      'evaluasi',
-      evaluasi.toMap(),
-      where: 'id = ?',
-      whereArgs: [evaluasi.id],
-    );
+    _ensureInitialized();
+    try {
+      List<String> evaluasiList = _prefs.getStringList('evaluasi_list') ?? [];
+      int index = evaluasiList.indexWhere((item) {
+        final data = EvaluasiData.fromMap(jsonDecode(item));
+        return data.id == evaluasi.id;
+      });
+
+      if (index >= 0) {
+        evaluasiList[index] = jsonEncode(evaluasi.toMap());
+        await _prefs.setStringList('evaluasi_list', evaluasiList);
+        return 1;
+      }
+      return 0;
+    } catch (e) {
+      print('Error updating evaluasi: $e');
+      return 0;
+    }
   }
 
-  // Delete data
+  // Delete evaluasi data
   Future<int> deleteEvaluasi(int id) async {
-    Database db = await database;
-    return await db.delete(
-      'evaluasi',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    _ensureInitialized();
+    try {
+      List<String> evaluasiList = _prefs.getStringList('evaluasi_list') ?? [];
+      evaluasiList.removeWhere((item) {
+        final data = EvaluasiData.fromMap(jsonDecode(item));
+        return data.id == id;
+      });
+      await _prefs.setStringList('evaluasi_list', evaluasiList);
+      return 1;
+    } catch (e) {
+      print('Error deleting evaluasi: $e');
+      return 0;
+    }
   }
 
   // Get statistics
   Future<Map<String, dynamic>> getStatistics() async {
-    Database db = await database;
+    _ensureInitialized();
+    try {
+      List<EvaluasiData> all = await getAllEvaluasi();
 
-    // Total bongkar dan muat
-    final totalResult = await db.rawQuery('''
-      SELECT 
-        SUM(realisasiBongkar) as totalBongkar,
-        SUM(realisasiMuat) as totalMuat,
-        SUM(targetBongkar) as totalTargetBongkar,
-        SUM(targetMuat) as totalTargetMuat,
-        COUNT(*) as totalRecords
-      FROM evaluasi
-    ''');
+      int totalBongkar = 0,
+          totalMuat = 0,
+          totalTargetBongkar = 0,
+          totalTargetMuat = 0;
 
-    // Average per day
-    final avgResult = await db.rawQuery('''
-      SELECT 
-        AVG(realisasiBongkar) as avgBongkar,
-        AVG(realisasiMuat) as avgMuat
-      FROM evaluasi
-    ''');
+      for (var item in all) {
+        totalBongkar += item.realisasiBongkar;
+        totalMuat += item.realisasiMuat;
+        totalTargetBongkar += item.targetBongkar;
+        totalTargetMuat += item.targetMuat;
+      }
 
-    final total = totalResult.first;
-    final avg = avgResult.first;
+      int avgBongkar = all.isEmpty ? 0 : (totalBongkar ~/ all.length);
+      int avgMuat = all.isEmpty ? 0 : (totalMuat ~/ all.length);
 
-    final totalBongkar = (total['totalBongkar'] as num?)?.toInt() ?? 0;
-    final totalMuat = (total['totalMuat'] as num?)?.toInt() ?? 0;
-    final totalTargetBongkar =
-        (total['totalTargetBongkar'] as num?)?.toInt() ?? 1;
-    final totalTargetMuat = (total['totalTargetMuat'] as num?)?.toInt() ?? 1;
-    final avgBongkar = (avg['avgBongkar'] as num?)?.toInt() ?? 0;
-    final avgMuat = (avg['avgMuat'] as num?)?.toInt() ?? 0;
-
-    return {
-      'totalBongkar': totalBongkar,
-      'totalMuat': totalMuat,
-      'avgBongkar': avgBongkar,
-      'avgMuat': avgMuat,
-      'persenBongkar': (totalBongkar / totalTargetBongkar * 100),
-      'persenMuat': (totalMuat / totalTargetMuat * 100),
-      'totalRecords': total['totalRecords'] ?? 0,
-    };
+      return {
+        'totalBongkar': totalBongkar,
+        'totalMuat': totalMuat,
+        'avgBongkar': avgBongkar,
+        'avgMuat': avgMuat,
+        'persenBongkar': totalTargetBongkar > 0
+            ? (totalBongkar / totalTargetBongkar * 100)
+            : 0.0,
+        'persenMuat':
+            totalTargetMuat > 0 ? (totalMuat / totalTargetMuat * 100) : 0.0,
+        'totalRecords': all.length,
+      };
+    } catch (e) {
+      print('Error getting statistics: $e');
+      return {
+        'totalBongkar': 0,
+        'totalMuat': 0,
+        'avgBongkar': 0,
+        'avgMuat': 0,
+        'persenBongkar': 0.0,
+        'persenMuat': 0.0,
+        'totalRecords': 0,
+      };
+    }
   }
 
   // ======================== TARGET DATA METHODS ========================
 
   // Insert target data
   Future<int> insertTargetData(TargetData target) async {
-    Database db = await database;
-    return await db.insert('target_data', target.toMap());
+    _ensureInitialized();
+    try {
+      List<TargetData> all = await getAllTargetData();
+      int maxId = all.isEmpty
+          ? 0
+          : all.map((e) => e.id ?? 0).reduce((a, b) => a > b ? a : b);
+      int newId = maxId + 1;
+
+      List<String> targetList = _prefs.getStringList('target_data_list') ?? [];
+      Map<String, dynamic> dataMap = target.toMap();
+      dataMap['id'] = newId;
+      String jsonData = jsonEncode(dataMap);
+      targetList.add(jsonData);
+      bool saveSuccess =
+          await _prefs.setStringList('target_data_list', targetList);
+
+      print('DEBUG: insertTargetData - ID: $newId');
+      print(
+          'DEBUG: insertTargetData - Data: ${dataMap['pelayaran']} - ${dataMap['kodeWS']}');
+      print('DEBUG: insertTargetData - Save Success: $saveSuccess');
+      print(
+          'DEBUG: insertTargetData - Total records now: ${targetList.length}');
+
+      return newId;
+    } catch (e) {
+      print('Error inserting target data: $e');
+      return 0;
+    }
   }
 
   // Get all target data
   Future<List<TargetData>> getAllTargetData() async {
-    Database db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'target_data',
-      orderBy: 'id DESC',
-    );
-    return List.generate(maps.length, (i) {
-      return TargetData.fromMap(maps[i]);
-    });
+    _ensureInitialized();
+    try {
+      List<String> targetList = _prefs.getStringList('target_data_list') ?? [];
+      print(
+          'DEBUG: getAllTargetData - Found ${targetList.length} records in SharedPreferences');
+
+      List<TargetData> result = [];
+      for (int i = 0; i < targetList.length; i++) {
+        try {
+          final data = TargetData.fromMap(jsonDecode(targetList[i]));
+          result.add(data);
+          print(
+              'DEBUG: Loaded target data #${i + 1}: ${data.pelayaran} - ${data.kodeWS}');
+        } catch (parseError) {
+          print('DEBUG: Error parsing target data at index $i: $parseError');
+        }
+      }
+      print(
+          'DEBUG: getAllTargetData - Successfully loaded ${result.length} items');
+      return result;
+    } catch (e) {
+      print('Error getting all target data: $e');
+      return [];
+    }
   }
 
   // Get target data by periode
   Future<List<TargetData>> getTargetDataByPeriode(String periode) async {
-    Database db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'target_data',
-      where: 'periode = ?',
-      whereArgs: [periode],
-      orderBy: 'id DESC',
-    );
-    return List.generate(maps.length, (i) {
-      return TargetData.fromMap(maps[i]);
-    });
+    _ensureInitialized();
+    try {
+      List<TargetData> all = await getAllTargetData();
+      return all.where((target) => target.periode == periode).toList();
+    } catch (e) {
+      print('Error getting target data by periode: $e');
+      return [];
+    }
   }
 
   // Search target data
   Future<List<TargetData>> searchTargetData(String query) async {
-    Database db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'target_data',
-      where: 'kodeWS LIKE ? OR pelayaran LIKE ?',
-      whereArgs: ['%$query%', '%$query%'],
-      orderBy: 'id DESC',
-    );
-    return List.generate(maps.length, (i) {
-      return TargetData.fromMap(maps[i]);
-    });
+    _ensureInitialized();
+    try {
+      List<TargetData> all = await getAllTargetData();
+      return all.where((target) {
+        return target.kodeWS.toLowerCase().contains(query.toLowerCase()) ||
+            target.pelayaran.toLowerCase().contains(query.toLowerCase());
+      }).toList();
+    } catch (e) {
+      print('Error searching target data: $e');
+      return [];
+    }
   }
 
   // Update target data
   Future<int> updateTargetData(TargetData target) async {
-    Database db = await database;
-    return await db.update(
-      'target_data',
-      target.toMap(),
-      where: 'id = ?',
-      whereArgs: [target.id],
-    );
+    _ensureInitialized();
+    try {
+      List<String> targetList = _prefs.getStringList('target_data_list') ?? [];
+      int index = targetList.indexWhere((item) {
+        final data = TargetData.fromMap(jsonDecode(item));
+        return data.id == target.id;
+      });
+
+      if (index >= 0) {
+        targetList[index] = jsonEncode(target.toMap());
+        await _prefs.setStringList('target_data_list', targetList);
+        return 1;
+      }
+      return 0;
+    } catch (e) {
+      print('Error updating target data: $e');
+      return 0;
+    }
   }
 
   // Delete target data
   Future<int> deleteTargetData(int id) async {
-    Database db = await database;
-    return await db.delete(
-      'target_data',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    _ensureInitialized();
+    try {
+      List<String> targetList = _prefs.getStringList('target_data_list') ?? [];
+      targetList.removeWhere((item) {
+        final data = TargetData.fromMap(jsonDecode(item));
+        return data.id == id;
+      });
+      await _prefs.setStringList('target_data_list', targetList);
+      return 1;
+    } catch (e) {
+      print('Error deleting target data: $e');
+      return 0;
+    }
   }
 
   // ======================== REALISASI DATA METHODS ========================
 
   // Insert realisasi data
   Future<int> insertRealisasiData(RealisasiData realisasi) async {
-    Database db = await database;
-    return await db.insert('realisasi_data', realisasi.toMap());
+    _ensureInitialized();
+    try {
+      List<RealisasiData> all = await getAllRealisasiData();
+      int maxId = all.isEmpty
+          ? 0
+          : all.map((e) => e.id ?? 0).reduce((a, b) => a > b ? a : b);
+      int newId = maxId + 1;
+
+      List<String> realisasiList =
+          _prefs.getStringList('realisasi_data_list') ?? [];
+      Map<String, dynamic> dataMap = realisasi.toMap();
+      dataMap['id'] = newId;
+      String jsonData = jsonEncode(dataMap);
+      realisasiList.add(jsonData);
+      bool saveSuccess =
+          await _prefs.setStringList('realisasi_data_list', realisasiList);
+
+      print('DEBUG: insertRealisasiData - ID: $newId');
+      print(
+          'DEBUG: insertRealisasiData - Data: ${dataMap['namaKapal']} - ${dataMap['kodeWS']}');
+      print('DEBUG: insertRealisasiData - Save Success: $saveSuccess');
+      print(
+          'DEBUG: insertRealisasiData - Total records now: ${realisasiList.length}');
+
+      return newId;
+    } catch (e) {
+      print('Error inserting realisasi data: $e');
+      return 0;
+    }
   }
 
   // Get all realisasi data
   Future<List<RealisasiData>> getAllRealisasiData() async {
-    Database db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'realisasi_data',
-      orderBy: 'id DESC',
-    );
-    return List.generate(maps.length, (i) {
-      return RealisasiData.fromMap(maps[i]);
-    });
+    _ensureInitialized();
+    try {
+      List<String> realisasiList =
+          _prefs.getStringList('realisasi_data_list') ?? [];
+      print(
+          'DEBUG: getAllRealisasiData - Found ${realisasiList.length} records in SharedPreferences');
+
+      List<RealisasiData> result = [];
+      for (int i = 0; i < realisasiList.length; i++) {
+        try {
+          final data = RealisasiData.fromMap(jsonDecode(realisasiList[i]));
+          result.add(data);
+          print(
+              'DEBUG: Loaded realisasi data #${i + 1}: ${data.namaKapal} - ${data.kodeWS}');
+        } catch (parseError) {
+          print('DEBUG: Error parsing realisasi data at index $i: $parseError');
+        }
+      }
+      print(
+          'DEBUG: getAllRealisasiData - Successfully loaded ${result.length} items');
+      return result;
+    } catch (e) {
+      print('Error getting all realisasi data: $e');
+      return [];
+    }
   }
 
   // Get realisasi data by periode
   Future<List<RealisasiData>> getRealisasiDataByPeriode(String periode) async {
-    Database db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'realisasi_data',
-      where: 'periode = ?',
-      whereArgs: [periode],
-      orderBy: 'id DESC',
-    );
-    return List.generate(maps.length, (i) {
-      return RealisasiData.fromMap(maps[i]);
-    });
+    _ensureInitialized();
+    try {
+      List<RealisasiData> all = await getAllRealisasiData();
+      return all.where((realisasi) => realisasi.periode == periode).toList();
+    } catch (e) {
+      print('Error getting realisasi data by periode: $e');
+      return [];
+    }
   }
 
   // Search realisasi data
   Future<List<RealisasiData>> searchRealisasiData(String query) async {
-    Database db = await database;
-    final List<Map<String, dynamic>> maps = await db.query(
-      'realisasi_data',
-      where: 'namaKapal LIKE ? OR kodeWS LIKE ? OR pelayaran LIKE ?',
-      whereArgs: ['%$query%', '%$query%', '%$query%'],
-      orderBy: 'id DESC',
-    );
-    return List.generate(maps.length, (i) {
-      return RealisasiData.fromMap(maps[i]);
-    });
+    _ensureInitialized();
+    try {
+      List<RealisasiData> all = await getAllRealisasiData();
+      return all.where((realisasi) {
+        return realisasi.namaKapal
+                .toLowerCase()
+                .contains(query.toLowerCase()) ||
+            realisasi.kodeWS.toLowerCase().contains(query.toLowerCase()) ||
+            realisasi.pelayaran.toLowerCase().contains(query.toLowerCase());
+      }).toList();
+    } catch (e) {
+      print('Error searching realisasi data: $e');
+      return [];
+    }
   }
 
   // Update realisasi data
   Future<int> updateRealisasiData(RealisasiData realisasi) async {
-    Database db = await database;
-    return await db.update(
-      'realisasi_data',
-      realisasi.toMap(),
-      where: 'id = ?',
-      whereArgs: [realisasi.id],
-    );
+    _ensureInitialized();
+    try {
+      List<String> realisasiList =
+          _prefs.getStringList('realisasi_data_list') ?? [];
+      int index = realisasiList.indexWhere((item) {
+        final data = RealisasiData.fromMap(jsonDecode(item));
+        return data.id == realisasi.id;
+      });
+
+      if (index >= 0) {
+        realisasiList[index] = jsonEncode(realisasi.toMap());
+        await _prefs.setStringList('realisasi_data_list', realisasiList);
+        return 1;
+      }
+      return 0;
+    } catch (e) {
+      print('Error updating realisasi data: $e');
+      return 0;
+    }
   }
 
   // Delete realisasi data
   Future<int> deleteRealisasiData(int id) async {
-    Database db = await database;
-    return await db.delete(
-      'realisasi_data',
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    _ensureInitialized();
+    try {
+      List<String> realisasiList =
+          _prefs.getStringList('realisasi_data_list') ?? [];
+      realisasiList.removeWhere((item) {
+        final data = RealisasiData.fromMap(jsonDecode(item));
+        return data.id == id;
+      });
+      await _prefs.setStringList('realisasi_data_list', realisasiList);
+      return 1;
+    } catch (e) {
+      print('Error deleting realisasi data: $e');
+      return 0;
+    }
   }
 
   // Get combined statistics (Target vs Realisasi)
   Future<Map<String, dynamic>> getCombinedStatistics() async {
-    Database db = await database;
+    _ensureInitialized();
+    try {
+      List<TargetData> allTarget = await getAllTargetData();
+      List<RealisasiData> allRealisasi = await getAllRealisasiData();
 
-    // Get target totals
-    final targetResult = await db.rawQuery('''
-      SELECT 
-        SUM(targetBongkar) as totalTargetBongkar,
-        SUM(targetMuat) as totalTargetMuat,
-        COUNT(*) as totalTargetRecords
-      FROM target_data
-    ''');
+      int totalTargetBongkar = 0, totalTargetMuat = 0;
+      int totalRealisasiBongkar = 0, totalRealisasiMuat = 0;
 
-    // Get realisasi totals
-    final realisasiResult = await db.rawQuery('''
-      SELECT 
-        SUM(realisasiBongkar) as totalRealisasiBongkar,
-        SUM(realisasiMuat) as totalRealisasiMuat,
-        COUNT(*) as totalRealisasiRecords
-      FROM realisasi_data
-    ''');
+      for (var target in allTarget) {
+        totalTargetBongkar += target.targetBongkar;
+        totalTargetMuat += target.targetMuat;
+      }
 
-    final target = targetResult.first;
-    final realisasi = realisasiResult.first;
+      for (var realisasi in allRealisasi) {
+        totalRealisasiBongkar += realisasi.realisasiBongkar;
+        totalRealisasiMuat += realisasi.realisasiMuat;
+      }
 
-    final totalTargetBongkar =
-        (target['totalTargetBongkar'] as num?)?.toInt() ?? 0;
-    final totalTargetMuat = (target['totalTargetMuat'] as num?)?.toInt() ?? 0;
-    final totalRealisasiBongkar =
-        (realisasi['totalRealisasiBongkar'] as num?)?.toInt() ?? 0;
-    final totalRealisasiMuat =
-        (realisasi['totalRealisasiMuat'] as num?)?.toInt() ?? 0;
-
-    return {
-      'totalTargetBongkar': totalTargetBongkar,
-      'totalTargetMuat': totalTargetMuat,
-      'totalRealisasiBongkar': totalRealisasiBongkar,
-      'totalRealisasiMuat': totalRealisasiMuat,
-      'achievementBongkar': totalTargetBongkar > 0
-          ? (totalRealisasiBongkar / totalTargetBongkar * 100)
-          : 0.0,
-      'achievementMuat': totalTargetMuat > 0
-          ? (totalRealisasiMuat / totalTargetMuat * 100)
-          : 0.0,
-      'totalTargetRecords': target['totalTargetRecords'] ?? 0,
-      'totalRealisasiRecords': realisasi['totalRealisasiRecords'] ?? 0,
-    };
+      return {
+        'totalTargetBongkar': totalTargetBongkar,
+        'totalTargetMuat': totalTargetMuat,
+        'totalRealisasiBongkar': totalRealisasiBongkar,
+        'totalRealisasiMuat': totalRealisasiMuat,
+        'achievementBongkar': totalTargetBongkar > 0
+            ? (totalRealisasiBongkar / totalTargetBongkar * 100)
+            : 0.0,
+        'achievementMuat': totalTargetMuat > 0
+            ? (totalRealisasiMuat / totalTargetMuat * 100)
+            : 0.0,
+        'totalTargetRecords': allTarget.length,
+        'totalRealisasiRecords': allRealisasi.length,
+      };
+    } catch (e) {
+      print('Error getting combined statistics: $e');
+      return {
+        'totalTargetBongkar': 0,
+        'totalTargetMuat': 0,
+        'totalRealisasiBongkar': 0,
+        'totalRealisasiMuat': 0,
+        'achievementBongkar': 0.0,
+        'achievementMuat': 0.0,
+        'totalTargetRecords': 0,
+        'totalRealisasiRecords': 0,
+      };
+    }
   }
 
   // Clear all data (optional, for testing)
   Future<void> clearAllData() async {
-    Database db = await database;
-    await db.delete('evaluasi');
-    await db.delete('target_data');
-    await db.delete('realisasi_data');
-  }
-
-  // Close database
-  Future<void> close() async {
-    Database db = await database;
-    await db.close();
+    _ensureInitialized();
+    try {
+      await _prefs.remove('evaluasi_list');
+      await _prefs.remove('target_data_list');
+      await _prefs.remove('realisasi_data_list');
+    } catch (e) {
+      print('Error clearing all data: $e');
+    }
   }
 }

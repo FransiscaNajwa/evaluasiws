@@ -13,6 +13,15 @@ import 'models/realisasi_data.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize storage layer before app runs
+  try {
+    await DatabaseHelper().initialize();
+    print('Storage initialized successfully');
+  } catch (e) {
+    print('Storage initialization error: $e');
+  }
+
   await initializeDateFormatting('id_ID', null);
   runApp(const TPKNilamApp());
 }
@@ -118,14 +127,23 @@ class _MainPageState extends State<MainPage> {
   List<RealisasiData> _realisasiDataList = [];
   bool _isLoadingData = false;
 
+  // Lock logic for Target form
+  bool _isTargetFormLocked = false;
+  String _lockReason = '';
+
+  // Date filter for data display
+  DateTime? _selectedFilterDate;
+
   @override
   void initState() {
     super.initState();
+    print('DEBUG: initState called');
     _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
       setState(() {
         _currentDateTime = DateTime.now();
       });
     });
+    print('DEBUG: About to call _loadDatabaseData');
     _loadDatabaseData();
   }
 
@@ -136,14 +154,27 @@ class _MainPageState extends State<MainPage> {
     });
 
     try {
+      print('DEBUG: Starting _loadDatabaseData...');
       final targetData = await _dbHelper.getAllTargetData();
+      print(
+          'DEBUG: _loadDatabaseData - Fetched ${targetData.length} target records');
+
       final realisasiData = await _dbHelper.getAllRealisasiData();
+      print(
+          'DEBUG: _loadDatabaseData - Fetched ${realisasiData.length} realisasi records');
 
       setState(() {
         _targetDataList = targetData;
         _realisasiDataList = realisasiData;
         _isLoadingData = false;
+        print(
+            'DEBUG: setState called - _targetDataList now has ${_targetDataList.length} items');
+        print(
+            'DEBUG: setState called - _realisasiDataList now has ${_realisasiDataList.length} items');
       });
+
+      // Check lock status after loading data
+      await _checkTargetFormLockStatus();
     } catch (e) {
       print('Error loading data: $e');
       setState(() {
@@ -154,9 +185,11 @@ class _MainPageState extends State<MainPage> {
 
   // Save Target Data
   Future<void> _saveTargetData() async {
+    print('DEBUG: _saveTargetData called');
     // Validate inputs
     if (_targetBongkarController.text.isEmpty ||
         _targetMuatController.text.isEmpty) {
+      print('DEBUG: Validation failed - empty fields');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Mohon isi semua field Target Bongkar dan Muat'),
@@ -187,13 +220,19 @@ class _MainPageState extends State<MainPage> {
         createdAt: DateTime.now().toIso8601String(),
       );
 
-      await _dbHelper.insertTargetData(targetData);
+      print(
+          'DEBUG: TargetData created: ${targetData.kodeWS} - ${targetData.pelayaran}');
+      print('DEBUG: About to insert into database');
+
+      int insertResult = await _dbHelper.insertTargetData(targetData);
+      print('DEBUG: insertTargetData returned: $insertResult');
 
       // Clear form
       _targetKodeWSController.clear();
       _targetBongkarController.clear();
       _targetMuatController.clear();
 
+      print('DEBUG: Reloading data after insert');
       // Reload data
       await _loadDatabaseData();
 
@@ -216,11 +255,13 @@ class _MainPageState extends State<MainPage> {
 
   // Save Realisasi Data
   Future<void> _saveRealisasiData() async {
+    print('DEBUG: _saveRealisasiData called');
     // Validate inputs
     if (_realisasiKodeWSController.text.isEmpty ||
         _realisasiNamaKapalController.text.isEmpty ||
         _realisasiBongkarController.text.isEmpty ||
         _realisasiMuatController.text.isEmpty) {
+      print('DEBUG: Validation failed - empty fields');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Mohon isi semua field yang diperlukan'),
@@ -254,7 +295,12 @@ class _MainPageState extends State<MainPage> {
         createdAt: DateTime.now().toIso8601String(),
       );
 
-      await _dbHelper.insertRealisasiData(realisasiData);
+      print(
+          'DEBUG: RealisasiData created: ${realisasiData.namaKapal} - ${realisasiData.kodeWS}');
+      print('DEBUG: About to insert into database');
+
+      int insertResult = await _dbHelper.insertRealisasiData(realisasiData);
+      print('DEBUG: insertRealisasiData returned: $insertResult');
 
       // Clear form
       _realisasiKodeWSController.clear();
@@ -262,6 +308,7 @@ class _MainPageState extends State<MainPage> {
       _realisasiBongkarController.clear();
       _realisasiMuatController.clear();
 
+      print('DEBUG: Reloading data after insert');
       // Reload data
       await _loadDatabaseData();
 
@@ -305,7 +352,6 @@ class _MainPageState extends State<MainPage> {
     }
   }
 
-  // Delete Realisasi Data
   Future<void> _deleteRealisasiData(int id) async {
     try {
       await _dbHelper.deleteRealisasiData(id);
@@ -326,6 +372,305 @@ class _MainPageState extends State<MainPage> {
         ),
       );
     }
+  }
+
+  // Edit Target Data
+  Future<void> _editTargetData(TargetData targetData) async {
+    _showEditTargetDialog(targetData);
+  }
+
+  void _showEditTargetDialog(TargetData data) {
+    // Initialize controllers with current data
+    final kodeWSController = TextEditingController(text: data.kodeWS);
+    final bongkarController =
+        TextEditingController(text: data.targetBongkar.toString());
+    final muatController =
+        TextEditingController(text: data.targetMuat.toString());
+    String selectedPelayaran = data.pelayaran;
+    String selectedPeriode = data.periode;
+    DateTime selectedBerthing = DateTime.parse(data.waktuBerthing);
+    DateTime selectedDeparture = DateTime.parse(data.waktuDeparture);
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              backgroundColor: AppColors.bgDark,
+              title: const Text('Edit Data Target'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButton<String>(
+                      value: selectedPelayaran,
+                      dropdownColor: AppColors.bgDark,
+                      isExpanded: true,
+                      items: pelayaranList
+                          .map((p) => DropdownMenuItem(
+                                value: p,
+                                child: Text(p),
+                              ))
+                          .toList(),
+                      onChanged: (value) {
+                        setState(() => selectedPelayaran = value!);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: kodeWSController,
+                      decoration: InputDecoration(
+                        hintText: 'Kode WS',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButton<String>(
+                      value: selectedPeriode,
+                      dropdownColor: AppColors.bgDark,
+                      isExpanded: true,
+                      items: ['Week 1', 'Week 2', 'Week 3', 'Week 4']
+                          .map((p) => DropdownMenuItem(
+                                value: p,
+                                child: Text(p),
+                              ))
+                          .toList(),
+                      onChanged: (value) {
+                        setState(() => selectedPeriode = value!);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: bongkarController,
+                      decoration: InputDecoration(
+                        hintText: 'Target Bongkar',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: muatController,
+                      decoration: InputDecoration(
+                        hintText: 'Target Muat',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Batal'),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    try {
+                      final updatedData = TargetData(
+                        id: data.id,
+                        pelayaran: selectedPelayaran,
+                        kodeWS: kodeWSController.text,
+                        periode: selectedPeriode,
+                        waktuBerthing: selectedBerthing.toIso8601String(),
+                        waktuDeparture: selectedDeparture.toIso8601String(),
+                        berthingTime: data.berthingTime,
+                        targetBongkar: int.parse(bongkarController.text),
+                        targetMuat: int.parse(muatController.text),
+                        createdAt: data.createdAt,
+                      );
+
+                      await _dbHelper.updateTargetData(updatedData);
+                      await _loadDatabaseData();
+
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Data target berhasil diperbarui!'),
+                          backgroundColor: AppColors.success,
+                        ),
+                      );
+                    } catch (e) {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Error: $e'),
+                          backgroundColor: AppColors.danger,
+                        ),
+                      );
+                    }
+                  },
+                  child: const Text('Simpan'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // Edit Realisasi Data
+  Future<void> _editRealisasiData(RealisasiData realisasiData) async {
+    _showEditRealisasiDialog(realisasiData);
+  }
+
+  void _showEditRealisasiDialog(RealisasiData data) {
+    // Initialize controllers with current data
+    final kodeWSController = TextEditingController(text: data.kodeWS);
+    final kapalController = TextEditingController(text: data.namaKapal);
+    final bongkarController =
+        TextEditingController(text: data.realisasiBongkar.toString());
+    final muatController =
+        TextEditingController(text: data.realisasiMuat.toString());
+    String selectedPelayaran = data.pelayaran;
+    String selectedPeriode = data.periode;
+
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return AlertDialog(
+              backgroundColor: AppColors.bgDark,
+              title: const Text('Edit Data Realisasi'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    DropdownButton<String>(
+                      value: selectedPelayaran,
+                      dropdownColor: AppColors.bgDark,
+                      isExpanded: true,
+                      items: pelayaranList
+                          .map((p) => DropdownMenuItem(
+                                value: p,
+                                child: Text(p),
+                              ))
+                          .toList(),
+                      onChanged: (value) {
+                        setState(() => selectedPelayaran = value!);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: kodeWSController,
+                      decoration: InputDecoration(
+                        hintText: 'Kode WS',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: kapalController,
+                      decoration: InputDecoration(
+                        hintText: 'Nama Kapal',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    DropdownButton<String>(
+                      value: selectedPeriode,
+                      dropdownColor: AppColors.bgDark,
+                      isExpanded: true,
+                      items: ['Week 1', 'Week 2', 'Week 3', 'Week 4']
+                          .map((p) => DropdownMenuItem(
+                                value: p,
+                                child: Text(p),
+                              ))
+                          .toList(),
+                      onChanged: (value) {
+                        setState(() => selectedPeriode = value!);
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: bongkarController,
+                      decoration: InputDecoration(
+                        hintText: 'Realisasi Bongkar',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: muatController,
+                      decoration: InputDecoration(
+                        hintText: 'Realisasi Muat',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                      ),
+                      keyboardType: TextInputType.number,
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Batal'),
+                ),
+                TextButton(
+                  onPressed: () async {
+                    try {
+                      final updatedData = RealisasiData(
+                        id: data.id,
+                        pelayaran: selectedPelayaran,
+                        kodeWS: kodeWSController.text,
+                        namaKapal: kapalController.text,
+                        periode: selectedPeriode,
+                        waktuArrival: data.waktuArrival,
+                        waktuBerthing: data.waktuBerthing,
+                        waktuDeparture: data.waktuDeparture,
+                        berthingTime: data.berthingTime,
+                        realisasiBongkar: int.parse(bongkarController.text),
+                        realisasiMuat: int.parse(muatController.text),
+                        createdAt: data.createdAt,
+                      );
+
+                      await _dbHelper.updateRealisasiData(updatedData);
+                      await _loadDatabaseData();
+
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Data realisasi berhasil diperbarui!'),
+                          backgroundColor: AppColors.success,
+                        ),
+                      );
+                    } catch (e) {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Error: $e'),
+                          backgroundColor: AppColors.danger,
+                        ),
+                      );
+                    }
+                  },
+                  child: const Text('Simpan'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -395,7 +740,7 @@ class _MainPageState extends State<MainPage> {
                   colors: [AppColors.accent, AppColors.secondary],
                 ).createShader(bounds),
                 child: const Text(
-                  '🚢 TPK NILAM - Sistem Evaluasi WS',
+                  '≡ƒÜó TPK NILAM - Sistem Evaluasi WS',
                   style: TextStyle(
                     fontSize: 28,
                     fontWeight: FontWeight.w800,
@@ -416,12 +761,67 @@ class _MainPageState extends State<MainPage> {
           Column(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              Text(
-                DateFormat('EEEE, d MMMM yyyy', 'id_ID')
-                    .format(_currentDateTime),
-                style: const TextStyle(
-                  fontSize: 12,
-                  color: AppColors.textSecondary,
+              // Date Filter Selector
+              GestureDetector(
+                onTap: _selectFilterDate,
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: _selectedFilterDate != null
+                        ? AppColors.secondary.withOpacity(0.2)
+                        : AppColors.bgDark.withOpacity(0.5),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: _selectedFilterDate != null
+                          ? AppColors.secondary
+                          : AppColors.border,
+                    ),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.calendar_today,
+                        size: 14,
+                        color: _selectedFilterDate != null
+                            ? AppColors.secondary
+                            : AppColors.textSecondary,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _selectedFilterDate != null
+                            ? DateFormat('EEEE, d MMMM yyyy', 'id_ID')
+                                .format(_selectedFilterDate!)
+                            : DateFormat('EEEE, d MMMM yyyy', 'id_ID')
+                                .format(_currentDateTime),
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: _selectedFilterDate != null
+                              ? AppColors.secondary
+                              : AppColors.textSecondary,
+                          fontWeight: _selectedFilterDate != null
+                              ? FontWeight.w600
+                              : FontWeight.normal,
+                        ),
+                      ),
+                      if (_selectedFilterDate != null) ...[
+                        const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _selectedFilterDate = null;
+                            });
+                          },
+                          child: const Icon(
+                            Icons.close,
+                            size: 14,
+                            color: AppColors.secondary,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               ),
               const SizedBox(height: 8),
@@ -443,7 +843,7 @@ class _MainPageState extends State<MainPage> {
 
   Widget _buildTabButtons() {
     final tabs = [
-      '▦ Entry Target',
+      '🎯 Entry Target',
       '✔ Entry Realisasi',
       '📊 Grafik Analisis',
       '📋 Riwayat Target dan Realisasi'
@@ -521,6 +921,34 @@ class _MainPageState extends State<MainPage> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                // Lock Banner
+                if (_isTargetFormLocked)
+                  Container(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: AppColors.warning.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: AppColors.warning),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.lock,
+                            color: AppColors.warning, size: 20),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            _lockReason,
+                            style: const TextStyle(
+                              color: AppColors.warning,
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 _buildFormLabel('PELAYARAN'),
                 _buildDropdownField(
                   value: _selectedPelayaranTarget,
@@ -533,18 +961,23 @@ class _MainPageState extends State<MainPage> {
                 _buildTextField(
                   controller: _targetKodeWSController,
                   hint: 'Contoh: MMTK',
+                  enabled: !_isTargetFormLocked,
                 ),
                 _buildFormLabel('PERIODE'),
                 _buildDropdownField(
                   value: _selectedPeriodeTarget,
                   items: ['Week 1', 'Week 2', 'Week 3', 'Week 4'],
-                  onChanged: (value) {
-                    setState(() => _selectedPeriodeTarget = value!);
-                  },
+                  onChanged: _isTargetFormLocked
+                      ? null
+                      : (value) {
+                          setState(() => _selectedPeriodeTarget = value!);
+                        },
                 ),
                 _buildFormLabel('BERTHING TIME (TB)'),
                 GestureDetector(
-                  onTap: () => _selectDateTimeTargetBerthing(),
+                  onTap: _isTargetFormLocked
+                      ? null
+                      : () => _selectDateTimeTargetBerthing(),
                   child: Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -630,7 +1063,9 @@ class _MainPageState extends State<MainPage> {
                 const SizedBox(height: 16),
                 _buildFormLabel('DEPARTURE TIME (TD)'),
                 GestureDetector(
-                  onTap: () => _selectDateTimeTargetDeparture(),
+                  onTap: _isTargetFormLocked
+                      ? null
+                      : () => _selectDateTimeTargetDeparture(),
                   child: Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -769,7 +1204,8 @@ class _MainPageState extends State<MainPage> {
                                 const SizedBox(height: 6),
                                 _buildTextField(
                                   controller: _targetBongkarController,
-                                  hint: 'ton',
+                                  hint: 'TEUS',
+                                  enabled: !_isTargetFormLocked,
                                 ),
                               ],
                             ),
@@ -789,7 +1225,8 @@ class _MainPageState extends State<MainPage> {
                                 const SizedBox(height: 6),
                                 _buildTextField(
                                   controller: _targetMuatController,
-                                  hint: 'ton',
+                                  hint: 'TEUS',
+                                  enabled: !_isTargetFormLocked,
                                 ),
                               ],
                             ),
@@ -800,7 +1237,13 @@ class _MainPageState extends State<MainPage> {
                   ),
                 ),
                 const SizedBox(height: 20),
-                _buildSaveButton('Simpan Target', _saveTargetData),
+                IgnorePointer(
+                  ignoring: _isTargetFormLocked,
+                  child: Opacity(
+                    opacity: _isTargetFormLocked ? 0.5 : 1.0,
+                    child: _buildSaveButton('Simpan Target', _saveTargetData),
+                  ),
+                ),
               ],
             ),
           ),
@@ -922,7 +1365,7 @@ class _MainPageState extends State<MainPage> {
                                 const SizedBox(height: 6),
                                 _buildTextField(
                                   controller: _realisasiBongkarController,
-                                  hint: 'ton',
+                                  hint: 'TEUS',
                                 ),
                               ],
                             ),
@@ -942,7 +1385,7 @@ class _MainPageState extends State<MainPage> {
                                 const SizedBox(height: 6),
                                 _buildTextField(
                                   controller: _realisasiMuatController,
-                                  hint: 'ton',
+                                  hint: 'TEUS',
                                 ),
                               ],
                             ),
@@ -1138,7 +1581,7 @@ class _MainPageState extends State<MainPage> {
               Expanded(
                 child: _buildDropdownField(
                   value: _chartSelectedTahun,
-                  items: ['2022', '2023', '2024', '2025', '2026'],
+                  items: _generateYearList(),
                   onChanged: (value) {
                     setState(() => _chartSelectedTahun = value!);
                   },
@@ -1349,11 +1792,11 @@ class _MainPageState extends State<MainPage> {
         // Panel 4: SELISIH BONGKAR (Discharge)
         _buildChartPanel(
           title: 'SELISIH BONGKAR (Discharge)',
-          subtitle: 'Selisih (ton)',
+          subtitle: 'Selisih (TEUS)',
           minY: -300,
           maxY: 300,
           interval: 100,
-          rataRata: '-45.0 ton',
+          rataRata: '-45.0 TEUS',
           data: [
             [
               150,
@@ -1389,11 +1832,11 @@ class _MainPageState extends State<MainPage> {
         // Panel 5: SELISIH MUAT (Loading)
         _buildChartPanel(
           title: 'SELISIH MUAT (Loading)',
-          subtitle: 'Selisih (ton)',
+          subtitle: 'Selisih (TEUS)',
           minY: -300,
           maxY: 300,
           interval: 100,
-          rataRata: '-71.5 ton',
+          rataRata: '-71.5 TEUS',
           data: [
             [
               100,
@@ -1454,6 +1897,16 @@ class _MainPageState extends State<MainPage> {
     );
   }
 
+  List<String> _generateYearList() {
+    // Generate years dynamically: current year ± 3 years
+    int currentYear = DateTime.now().year;
+    List<String> years = [];
+    for (int i = currentYear - 3; i <= currentYear + 3; i++) {
+      years.add(i.toString());
+    }
+    return years;
+  }
+
   Widget _buildChartPanel({
     required String title,
     required String subtitle,
@@ -1462,7 +1915,14 @@ class _MainPageState extends State<MainPage> {
     required double interval,
     required String rataRata,
     required List<List<double>> data,
+    double? thresholdValue, // Optional threshold line value
   }) {
+    // Calculate data range
+    double dataMin = data[0].reduce((a, b) => a < b ? a : b);
+    double dataMax = data[0].reduce((a, b) => a > b ? a : b);
+    String rangeDisplay =
+        'Range: ${dataMin.toStringAsFixed(1)} / ${dataMax.toStringAsFixed(1)}';
+
     // Generate x-axis labels (dates)
     final labels = List.generate(26, (index) {
       final day = 27 + index;
@@ -1567,6 +2027,23 @@ class _MainPageState extends State<MainPage> {
                   ),
                 ),
               ),
+              const SizedBox(width: 8),
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.secondary.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  rangeDisplay,
+                  style: const TextStyle(
+                    color: AppColors.secondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 16),
@@ -1588,6 +2065,14 @@ class _MainPageState extends State<MainPage> {
                         dashArray: [5, 3],
                       );
                     }
+                    // Optional threshold line at specified value
+                    if (thresholdValue != null && value == thresholdValue) {
+                      return FlLine(
+                        color: AppColors.warning,
+                        strokeWidth: 1.5,
+                        dashArray: [5, 3],
+                      );
+                    }
                     return FlLine(
                       color: AppColors.border.withOpacity(0.3),
                       strokeWidth: 0.5,
@@ -1602,6 +2087,17 @@ class _MainPageState extends State<MainPage> {
                 ),
                 titlesData: FlTitlesData(
                   bottomTitles: AxisTitles(
+                    axisNameWidget: const Padding(
+                      padding: EdgeInsets.only(top: 8),
+                      child: Text(
+                        'Tanggal',
+                        style: TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
                     sideTitles: SideTitles(
                       showTitles: true,
                       interval: 2,
@@ -1626,6 +2122,17 @@ class _MainPageState extends State<MainPage> {
                     ),
                   ),
                   leftTitles: AxisTitles(
+                    axisNameWidget: const Padding(
+                      padding: EdgeInsets.only(right: 8),
+                      child: Text(
+                        'Selisih',
+                        style: TextStyle(
+                          color: AppColors.textSecondary,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
                     sideTitles: SideTitles(
                       showTitles: true,
                       reservedSize: 45,
@@ -1685,151 +2192,218 @@ class _MainPageState extends State<MainPage> {
 
   // ======================== RIWAYAT TAB ========================
   Widget _buildDataReferensiTab() {
-    return _buildCard(
-      title: '📋 Riwayat Target dan Realisasi',
+    return SingleChildScrollView(
       child: Column(
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  style: const TextStyle(
-                    fontFamily: 'JetBrains Mono',
-                    color: AppColors.textPrimary,
-                  ),
-                  decoration: InputDecoration(
-                    hintText: 'Cari kapal / WS...',
-                    hintStyle: const TextStyle(color: AppColors.textSecondary),
-                    prefixIcon:
-                        const Icon(Icons.search, color: AppColors.secondary),
-                    filled: true,
-                    fillColor: AppColors.bgDark,
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: AppColors.border),
+          // Target History Table Section
+          _buildCard(
+            title: '📊 Riwayat Entry Target',
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: SizedBox.shrink(),
                     ),
-                    enabledBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: AppColors.border),
+                    SizedBox(
+                      width: 120,
+                      child: ElevatedButton.icon(
+                        onPressed: _exportTableToPDF,
+                        icon: const Icon(Icons.picture_as_pdf, size: 16),
+                        label:
+                            const Text('PDF', style: TextStyle(fontSize: 11)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.danger,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                      ),
                     ),
-                    focusedBorder: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(
-                          color: AppColors.secondary, width: 2),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      width: 120,
+                      child: ElevatedButton.icon(
+                        onPressed: _exportTableToExcel,
+                        icon: const Icon(Icons.table_chart, size: 16),
+                        label:
+                            const Text('Excel', style: TextStyle(fontSize: 11)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.success,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                      ),
                     ),
-                  ),
+                  ],
                 ),
-              ),
-              const SizedBox(width: 16),
-              Column(
-                children: [
-                  SizedBox(
-                    width: 120,
-                    child: ElevatedButton.icon(
-                      onPressed: _exportTableToPDF,
-                      icon: const Icon(Icons.picture_as_pdf, size: 16),
-                      label: const Text('PDF', style: TextStyle(fontSize: 11)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.danger,
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    width: 120,
-                    child: ElevatedButton.icon(
-                      onPressed: _exportTableToExcel,
-                      icon: const Icon(Icons.table_chart, size: 16),
-                      label:
-                          const Text('Excel', style: TextStyle(fontSize: 11)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.success,
-                        padding: const EdgeInsets.symmetric(vertical: 10),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
+                const SizedBox(height: 16),
+                _buildTargetHistoryTable(),
+              ],
+            ),
           ),
-          const SizedBox(height: 20),
-          _buildDataReferensiTable(),
+          const SizedBox(height: 24),
+          // Realisasi History Table Section
+          _buildCard(
+            title: '📊 Riwayat Entry Realisasi',
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    const Expanded(
+                      child: SizedBox.shrink(),
+                    ),
+                    SizedBox(
+                      width: 120,
+                      child: ElevatedButton.icon(
+                        onPressed: _exportTableToPDF,
+                        icon: const Icon(Icons.picture_as_pdf, size: 16),
+                        label:
+                            const Text('PDF', style: TextStyle(fontSize: 11)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.danger,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    SizedBox(
+                      width: 120,
+                      child: ElevatedButton.icon(
+                        onPressed: _exportTableToExcel,
+                        icon: const Icon(Icons.table_chart, size: 16),
+                        label:
+                            const Text('Excel', style: TextStyle(fontSize: 11)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.success,
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _buildRealisasiHistoryTable(),
+              ],
+            ),
+          ),
         ],
       ),
     );
   }
 
   Widget _buildTargetDataTable() {
+    print('DEBUG: _buildTargetDataTable called');
+    print('DEBUG: _targetDataList.length = ${_targetDataList.length}');
+    print('DEBUG: _selectedFilterDate = $_selectedFilterDate');
+
     if (_isLoadingData) {
       return const Center(
         child: CircularProgressIndicator(color: AppColors.secondary),
       );
     }
 
-    if (_targetDataList.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(32.0),
-          child: Text(
-            'Belum ada data target.\nSilakan input data baru.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 14,
+    // Filter data by selected date
+    List<TargetData> filteredList = _targetDataList;
+    if (_selectedFilterDate != null) {
+      filteredList = _targetDataList.where((data) {
+        final dataDate = DateTime.parse(data.waktuBerthing);
+        return dataDate.year == _selectedFilterDate!.year &&
+            dataDate.month == _selectedFilterDate!.month &&
+            dataDate.day == _selectedFilterDate!.day;
+      }).toList();
+    }
+
+    print('DEBUG: filteredList.length after filter = ${filteredList.length}');
+
+    if (filteredList.isEmpty) {
+      return _buildCard(
+        title: '📊 Data Target Bongkar/Muat',
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32.0),
+            child: Text(
+              _selectedFilterDate != null
+                  ? 'Tidak ada data target untuk tanggal ${DateFormat('d MMMM yyyy', 'id_ID').format(_selectedFilterDate!)}'
+                  : 'Belum ada data target yang diinput',
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 14,
+              ),
             ),
           ),
         ),
       );
     }
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        headingRowColor: MaterialStateProperty.all(
-          AppColors.bgLight.withOpacity(0.5),
+    if (_targetDataList.isEmpty) {
+      return _buildCard(
+        title: '📊 Data Target Bongkar/Muat',
+        child: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(32.0),
+            child: Text(
+              'Belum ada data target.\nSilakan input data baru.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 14,
+              ),
+            ),
+          ),
         ),
-        dataRowColor: MaterialStateProperty.resolveWith<Color>(
-          (Set<MaterialState> states) {
-            if (states.contains(MaterialState.hovered)) {
-              return AppColors.bgLight.withOpacity(0.3);
-            }
-            return Colors.transparent;
-          },
+      );
+    }
+
+    return _buildCard(
+      title: '📊 Data Target Bongkar/Muat',
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          headingRowColor: MaterialStateProperty.all(
+            AppColors.bgLight.withOpacity(0.5),
+          ),
+          dataRowColor: MaterialStateProperty.resolveWith<Color>(
+            (Set<MaterialState> states) {
+              if (states.contains(MaterialState.hovered)) {
+                return AppColors.bgLight.withOpacity(0.3);
+              }
+              return Colors.transparent;
+            },
+          ),
+          columns: const [
+            DataColumn(label: Text('NO')),
+            DataColumn(label: Text('PELAYARAN')),
+            DataColumn(label: Text('WS')),
+            DataColumn(label: Text('WEEK')),
+            DataColumn(label: Text('TB')),
+            DataColumn(label: Text('TD')),
+            DataColumn(label: Text('BT')),
+            DataColumn(label: Text('TARGET (B/M)')),
+            DataColumn(label: Text('AKSI')),
+          ],
+          rows: filteredList.asMap().entries.map((entry) {
+            int index = entry.key;
+            TargetData data = entry.value;
+
+            // Format DateTime
+            final tbDate = DateTime.parse(data.waktuBerthing);
+            final tdDate = DateTime.parse(data.waktuDeparture);
+            final tbFormatted = DateFormat('dd/MM HH:mm').format(tbDate);
+            final tdFormatted = DateFormat('dd/MM HH:mm').format(tdDate);
+
+            return _buildTargetDataTableRow(
+              no: '${index + 1}',
+              pelayaran: data.pelayaran,
+              ws: data.kodeWS,
+              week: data.periode,
+              tb: tbFormatted,
+              td: tdFormatted,
+              bt: data.berthingTime,
+              target: '${data.targetBongkar} / ${data.targetMuat}',
+              targetData: data,
+              onEdit: () => _editTargetData(data),
+              onDelete: () => _deleteTargetData(data.id!),
+            );
+          }).toList(),
         ),
-        columns: const [
-          DataColumn(label: Text('NO')),
-          DataColumn(label: Text('PELAYARAN')),
-          DataColumn(label: Text('WS')),
-          DataColumn(label: Text('WEEK')),
-          DataColumn(label: Text('TB')),
-          DataColumn(label: Text('TD')),
-          DataColumn(label: Text('BT')),
-          DataColumn(label: Text('TARGET (B/M)')),
-          DataColumn(label: Text('AKSI')),
-        ],
-        rows: _targetDataList.asMap().entries.map((entry) {
-          int index = entry.key;
-          TargetData data = entry.value;
-
-          // Format DateTime
-          final tbDate = DateTime.parse(data.waktuBerthing);
-          final tdDate = DateTime.parse(data.waktuDeparture);
-          final tbFormatted = DateFormat('dd/MM HH:mm').format(tbDate);
-          final tdFormatted = DateFormat('dd/MM HH:mm').format(tdDate);
-
-          return _buildTargetDataTableRow(
-            no: '${index + 1}',
-            pelayaran: data.pelayaran,
-            ws: data.kodeWS,
-            week: data.periode,
-            tb: tbFormatted,
-            td: tdFormatted,
-            bt: data.berthingTime,
-            target: '${data.targetBongkar} / ${data.targetMuat}',
-            onDelete: () => _deleteTargetData(data.id!),
-          );
-        }).toList(),
       ),
     );
   }
@@ -1841,75 +2415,114 @@ class _MainPageState extends State<MainPage> {
       );
     }
 
-    if (_realisasiDataList.isEmpty) {
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(32.0),
-          child: Text(
-            'Belum ada data realisasi.\nSilakan input data baru.',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 14,
+    // Filter data by selected date
+    List<RealisasiData> filteredList = _realisasiDataList;
+    if (_selectedFilterDate != null) {
+      filteredList = _realisasiDataList.where((data) {
+        final dataDate = DateTime.parse(data.waktuBerthing);
+        return dataDate.year == _selectedFilterDate!.year &&
+            dataDate.month == _selectedFilterDate!.month &&
+            dataDate.day == _selectedFilterDate!.day;
+      }).toList();
+    }
+
+    if (filteredList.isEmpty) {
+      return _buildCard(
+        title: '📊 Data Realisasi Bongkar/Muat',
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32.0),
+            child: Text(
+              _selectedFilterDate != null
+                  ? 'Tidak ada data realisasi untuk tanggal ${DateFormat('d MMMM yyyy', 'id_ID').format(_selectedFilterDate!)}'
+                  : 'Belum ada data realisasi yang diinput',
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 14,
+              ),
             ),
           ),
         ),
       );
     }
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        headingRowColor: MaterialStateProperty.all(
-          AppColors.bgLight.withOpacity(0.5),
+    if (_realisasiDataList.isEmpty) {
+      return _buildCard(
+        title: '📊 Data Realisasi Bongkar/Muat',
+        child: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(32.0),
+            child: Text(
+              'Belum ada data realisasi.\nSilakan input data baru.',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 14,
+              ),
+            ),
+          ),
         ),
-        dataRowColor: MaterialStateProperty.resolveWith<Color>(
-          (Set<MaterialState> states) {
-            if (states.contains(MaterialState.hovered)) {
-              return AppColors.bgLight.withOpacity(0.3);
-            }
-            return Colors.transparent;
-          },
+      );
+    }
+
+    return _buildCard(
+      title: '📊 Data Realisasi Bongkar/Muat',
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          headingRowColor: MaterialStateProperty.all(
+            AppColors.bgLight.withOpacity(0.5),
+          ),
+          dataRowColor: MaterialStateProperty.resolveWith<Color>(
+            (Set<MaterialState> states) {
+              if (states.contains(MaterialState.hovered)) {
+                return AppColors.bgLight.withOpacity(0.3);
+              }
+              return Colors.transparent;
+            },
+          ),
+          columns: const [
+            DataColumn(label: Text('NO')),
+            DataColumn(label: Text('PELAYARAN')),
+            DataColumn(label: Text('WS')),
+            DataColumn(label: Text('KAPAL')),
+            DataColumn(label: Text('WEEK')),
+            DataColumn(label: Text('TA')),
+            DataColumn(label: Text('TB')),
+            DataColumn(label: Text('TD')),
+            DataColumn(label: Text('BT')),
+            DataColumn(label: Text('REALISASI (B/M)')),
+            DataColumn(label: Text('AKSI')),
+          ],
+          rows: filteredList.asMap().entries.map((entry) {
+            int index = entry.key;
+            RealisasiData data = entry.value;
+
+            // Format DateTime
+            final taDate = DateTime.parse(data.waktuArrival);
+            final tbDate = DateTime.parse(data.waktuBerthing);
+            final tdDate = DateTime.parse(data.waktuDeparture);
+            final taFormatted = DateFormat('dd/MM HH:mm').format(taDate);
+            final tbFormatted = DateFormat('dd/MM HH:mm').format(tbDate);
+            final tdFormatted = DateFormat('dd/MM HH:mm').format(tdDate);
+
+            return _buildRealisasiDataTableRow(
+              no: '${index + 1}',
+              pelayaran: data.pelayaran,
+              ws: data.kodeWS,
+              kapal: data.namaKapal,
+              week: data.periode,
+              ta: taFormatted,
+              tb: tbFormatted,
+              td: tdFormatted,
+              bt: data.berthingTime,
+              realisasi: '${data.realisasiBongkar} / ${data.realisasiMuat}',
+              realisasiData: data,
+              onEdit: () => _editRealisasiData(data),
+              onDelete: () => _deleteRealisasiData(data.id!),
+            );
+          }).toList(),
         ),
-        columns: const [
-          DataColumn(label: Text('NO')),
-          DataColumn(label: Text('PELAYARAN')),
-          DataColumn(label: Text('WS')),
-          DataColumn(label: Text('KAPAL')),
-          DataColumn(label: Text('WEEK')),
-          DataColumn(label: Text('TA')),
-          DataColumn(label: Text('TB')),
-          DataColumn(label: Text('TD')),
-          DataColumn(label: Text('BT')),
-          DataColumn(label: Text('REALISASI (B/M)')),
-          DataColumn(label: Text('AKSI')),
-        ],
-        rows: _realisasiDataList.asMap().entries.map((entry) {
-          int index = entry.key;
-          RealisasiData data = entry.value;
-
-          // Format DateTime
-          final taDate = DateTime.parse(data.waktuArrival);
-          final tbDate = DateTime.parse(data.waktuBerthing);
-          final tdDate = DateTime.parse(data.waktuDeparture);
-          final taFormatted = DateFormat('dd/MM HH:mm').format(taDate);
-          final tbFormatted = DateFormat('dd/MM HH:mm').format(tbDate);
-          final tdFormatted = DateFormat('dd/MM HH:mm').format(tdDate);
-
-          return _buildRealisasiDataTableRow(
-            no: '${index + 1}',
-            pelayaran: data.pelayaran,
-            ws: data.kodeWS,
-            kapal: data.namaKapal,
-            week: data.periode,
-            ta: taFormatted,
-            tb: tbFormatted,
-            td: tdFormatted,
-            bt: data.berthingTime,
-            realisasi: '${data.realisasiBongkar} / ${data.realisasiMuat}',
-            onDelete: () => _deleteRealisasiData(data.id!),
-          );
-        }).toList(),
       ),
     );
   }
@@ -1923,6 +2536,8 @@ class _MainPageState extends State<MainPage> {
     required String td,
     required String bt,
     required String target,
+    required TargetData targetData,
+    required VoidCallback onEdit,
     required VoidCallback onDelete,
   }) {
     return DataRow(cells: [
@@ -1945,15 +2560,7 @@ class _MainPageState extends State<MainPage> {
       DataCell(Row(
         children: [
           InkWell(
-            onTap: () {
-              // TODO: Implement edit functionality
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Edit functionality coming soon'),
-                  backgroundColor: AppColors.secondary,
-                ),
-              );
-            },
+            onTap: onEdit,
             child: const Text('Edit',
                 style: TextStyle(
                     color: AppColors.secondary,
@@ -1985,6 +2592,8 @@ class _MainPageState extends State<MainPage> {
     required String td,
     required String bt,
     required String realisasi,
+    required RealisasiData realisasiData,
+    required VoidCallback onEdit,
     required VoidCallback onDelete,
   }) {
     return DataRow(cells: [
@@ -2010,15 +2619,7 @@ class _MainPageState extends State<MainPage> {
       DataCell(Row(
         children: [
           InkWell(
-            onTap: () {
-              // TODO: Implement edit functionality
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Edit functionality coming soon'),
-                  backgroundColor: AppColors.secondary,
-                ),
-              );
-            },
+            onTap: onEdit,
             child: const Text('Edit',
                 style: TextStyle(
                     color: AppColors.secondary,
@@ -2039,163 +2640,174 @@ class _MainPageState extends State<MainPage> {
     ]);
   }
 
-  Widget _buildDataReferensiTable() {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: DataTable(
-        headingRowColor: MaterialStateProperty.all(
-          AppColors.bgLight.withOpacity(0.5),
+  // Target History Table
+  Widget _buildTargetHistoryTable() {
+    if (_isLoadingData) {
+      return const Center(
+        child: CircularProgressIndicator(color: AppColors.secondary),
+      );
+    }
+
+    if (_targetDataList.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32.0),
+          child: Text(
+            'Belum ada data target yang diinput',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 14,
+            ),
+          ),
         ),
-        dataRowColor: MaterialStateProperty.resolveWith<Color>(
-          (Set<MaterialState> states) {
-            if (states.contains(MaterialState.hovered)) {
-              return AppColors.bgLight.withOpacity(0.3);
-            }
-            return Colors.transparent;
-          },
+      );
+    }
+
+    return Card(
+      color: AppColors.bgDark,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          headingRowColor: MaterialStateProperty.all(
+            AppColors.bgLight.withOpacity(0.5),
+          ),
+          dataRowColor: MaterialStateProperty.resolveWith<Color>(
+            (Set<MaterialState> states) {
+              if (states.contains(MaterialState.hovered)) {
+                return AppColors.bgLight.withOpacity(0.3);
+              }
+              return Colors.transparent;
+            },
+          ),
+          columns: const [
+            DataColumn(label: Text('NO')),
+            DataColumn(label: Text('PELAYARAN')),
+            DataColumn(label: Text('WS')),
+            DataColumn(label: Text('PERIODE')),
+            DataColumn(label: Text('TB')),
+            DataColumn(label: Text('TD')),
+            DataColumn(label: Text('BT')),
+            DataColumn(label: Text('TARGET BONGKAR')),
+            DataColumn(label: Text('TARGET MUAT')),
+            DataColumn(label: Text('AKSI')),
+          ],
+          rows: List.generate(
+            _targetDataList.length,
+            (index) {
+              final data = _targetDataList[index];
+              return _buildTargetHistoryRow(
+                no: '${index + 1}',
+                targetData: data,
+                onEdit: () => _editTargetData(data),
+                onDelete: () => _deleteTargetData(data.id!),
+              );
+            },
+          ),
         ),
-        columns: const [
-          DataColumn(label: Text('NO')),
-          DataColumn(label: Text('PELAYARAN')),
-          DataColumn(label: Text('WS')),
-          DataColumn(label: Text('KAPAL')),
-          DataColumn(label: Text('WEEK')),
-          DataColumn(label: Text('TA')),
-          DataColumn(label: Text('TB')),
-          DataColumn(label: Text('TD')),
-          DataColumn(label: Text('BT')),
-          DataColumn(label: Text('TARGET (B/M)')),
-          DataColumn(label: Text('REALISASI (B/M)')),
-          DataColumn(label: Text('ACHIEVEMENT')),
-          DataColumn(label: Text('AKSI')),
-        ],
-        rows: [
-          _buildDataReferensiDataTableRow(
-              no: '1',
-              pelayaran: 'MERATUS',
-              ws: 'MMTK',
-              kapal: 'MERATUS BATAM',
-              week: '1',
-              ta: '28/12 02:40',
-              tb: '28/12 03:30',
-              td: '28/12 15:25',
-              bt: '11:55',
-              target: '512 / 0',
-              realisasi: '512 / 0',
-              achievement: '100% / -'),
-          _buildDataReferensiDataTableRow(
-              no: '2',
-              pelayaran: 'MERATUS',
-              ws: 'MMTK',
-              kapal: 'MERATUS LABUAN BAJO',
-              week: '2',
-              ta: '04/01 11:10',
-              tb: '04/01 12:23',
-              td: '05/01 11:42',
-              bt: '23:19',
-              target: '401 / 512',
-              realisasi: '401 / 512',
-              achievement: '100% / 100%'),
-          _buildDataReferensiDataTableRow(
-              no: '3',
-              pelayaran: 'MERATUS',
-              ws: 'MMTK',
-              kapal: 'MERATUS LARANTUKA',
-              week: '3',
-              ta: '11/01 17:58',
-              tb: '11/01 18:18',
-              td: '12/01 12:34',
-              bt: '18:16',
-              target: '409 / 391',
-              realisasi: '409 / 391',
-              achievement: '100% / 100%'),
-          _buildDataReferensiDataTableRow(
-              no: '4',
-              pelayaran: 'MERATUS',
-              ws: 'MPMI',
-              kapal: 'MERATUS GORONTALO',
-              week: '1',
-              ta: '28/12 21:27',
-              tb: '28/12 22:19',
-              td: '29/12 18:15',
-              bt: '19:56',
-              target: '324 / 348',
-              realisasi: '324 / 348',
-              achievement: '100% / 100%'),
-          _buildDataReferensiDataTableRow(
-              no: '5',
-              pelayaran: 'SPIL',
-              ws: 'SKD1',
-              kapal: 'SPIL RETNO',
-              week: '1',
-              ta: '27/12 18:52',
-              tb: '27/12 18:59',
-              td: '28/12 15:20',
-              bt: '20:21',
-              target: '400 / 430',
-              realisasi: '400 / 430',
-              achievement: '100% / 100%'),
-          _buildDataReferensiDataTableRow(
-              no: '6',
-              pelayaran: 'SPIL',
-              ws: 'SSR1',
-              kapal: 'BALI AYU',
-              week: '1',
-              ta: '29/12 01:18',
-              tb: '29/12 01:18',
-              td: '29/12 06:41',
-              bt: '05:23',
-              target: '245 / 0',
-              realisasi: '245 / 0',
-              achievement: '100% / -'),
-        ],
       ),
     );
   }
 
-  DataRow _buildDataReferensiDataTableRow({
+  // Realisasi History Table
+  Widget _buildRealisasiHistoryTable() {
+    if (_isLoadingData) {
+      return const Center(
+        child: CircularProgressIndicator(color: AppColors.secondary),
+      );
+    }
+
+    if (_realisasiDataList.isEmpty) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32.0),
+          child: Text(
+            'Belum ada data realisasi yang diinput',
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 14,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Card(
+      color: AppColors.bgDark,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: DataTable(
+          headingRowColor: MaterialStateProperty.all(
+            AppColors.bgLight.withOpacity(0.5),
+          ),
+          dataRowColor: MaterialStateProperty.resolveWith<Color>(
+            (Set<MaterialState> states) {
+              if (states.contains(MaterialState.hovered)) {
+                return AppColors.bgLight.withOpacity(0.3);
+              }
+              return Colors.transparent;
+            },
+          ),
+          columns: const [
+            DataColumn(label: Text('NO')),
+            DataColumn(label: Text('PELAYARAN')),
+            DataColumn(label: Text('WS')),
+            DataColumn(label: Text('KAPAL')),
+            DataColumn(label: Text('PERIODE')),
+            DataColumn(label: Text('TA')),
+            DataColumn(label: Text('TB')),
+            DataColumn(label: Text('TD')),
+            DataColumn(label: Text('BT')),
+            DataColumn(label: Text('REALISASI BONGKAR')),
+            DataColumn(label: Text('REALISASI MUAT')),
+            DataColumn(label: Text('AKSI')),
+          ],
+          rows: List.generate(
+            _realisasiDataList.length,
+            (index) {
+              final data = _realisasiDataList[index];
+              return _buildRealisasiHistoryRow(
+                no: '${index + 1}',
+                realisasiData: data,
+                onEdit: () => _editRealisasiData(data),
+                onDelete: () => _deleteRealisasiData(data.id!),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  DataRow _buildTargetHistoryRow({
     required String no,
-    required String pelayaran,
-    required String ws,
-    required String kapal,
-    required String week,
-    required String ta,
-    required String tb,
-    required String td,
-    required String bt,
-    required String target,
-    required String realisasi,
-    required String achievement,
+    required TargetData targetData,
+    required VoidCallback onEdit,
+    required VoidCallback onDelete,
   }) {
     return DataRow(cells: [
       DataCell(Text(no)),
-      DataCell(Text(pelayaran,
+      DataCell(Text(targetData.pelayaran,
           style: const TextStyle(
               color: AppColors.secondary, fontWeight: FontWeight.w600))),
-      DataCell(Text(ws,
+      DataCell(Text(targetData.kodeWS,
           style: const TextStyle(
               color: AppColors.accent, fontWeight: FontWeight.w600))),
-      DataCell(Text(kapal)),
-      DataCell(Text(week)),
-      DataCell(Text(ta,
+      DataCell(Text(targetData.periode,
           style: const TextStyle(fontSize: 11, fontFamily: 'JetBrains Mono'))),
-      DataCell(Text(tb,
+      DataCell(Text(targetData.waktuBerthing,
           style: const TextStyle(fontSize: 11, fontFamily: 'JetBrains Mono'))),
-      DataCell(Text(td,
+      DataCell(Text(targetData.waktuDeparture,
           style: const TextStyle(fontSize: 11, fontFamily: 'JetBrains Mono'))),
-      DataCell(Text(bt,
+      DataCell(Text(targetData.berthingTime,
           style: const TextStyle(fontSize: 11, fontFamily: 'JetBrains Mono'))),
-      DataCell(Text(target,
+      DataCell(Text(targetData.targetBongkar.toString(),
           style: const TextStyle(fontSize: 11, fontFamily: 'JetBrains Mono'))),
-      DataCell(Text(realisasi,
-          style: const TextStyle(fontSize: 11, fontFamily: 'JetBrains Mono'))),
-      DataCell(Text(achievement,
+      DataCell(Text(targetData.targetMuat.toString(),
           style: const TextStyle(fontSize: 11, fontFamily: 'JetBrains Mono'))),
       DataCell(Row(
         children: [
           InkWell(
-            onTap: () => _showEditDialog(
-                kapal: kapal, ws: ws, pelayaran: pelayaran, week: week),
+            onTap: onEdit,
             child: const Text('Edit',
                 style: TextStyle(
                     color: AppColors.secondary,
@@ -2204,7 +2816,60 @@ class _MainPageState extends State<MainPage> {
           ),
           const SizedBox(width: 12),
           InkWell(
-            onTap: () => _showDeleteConfirmation(kapal),
+            onTap: onDelete,
+            child: const Text('Hapus',
+                style: TextStyle(
+                    color: AppColors.danger,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600)),
+          ),
+        ],
+      )),
+    ]);
+  }
+
+  DataRow _buildRealisasiHistoryRow({
+    required String no,
+    required RealisasiData realisasiData,
+    required VoidCallback onEdit,
+    required VoidCallback onDelete,
+  }) {
+    return DataRow(cells: [
+      DataCell(Text(no)),
+      DataCell(Text(realisasiData.pelayaran,
+          style: const TextStyle(
+              color: AppColors.secondary, fontWeight: FontWeight.w600))),
+      DataCell(Text(realisasiData.kodeWS,
+          style: const TextStyle(
+              color: AppColors.accent, fontWeight: FontWeight.w600))),
+      DataCell(Text(realisasiData.namaKapal)),
+      DataCell(Text(realisasiData.periode,
+          style: const TextStyle(fontSize: 11, fontFamily: 'JetBrains Mono'))),
+      DataCell(Text(realisasiData.waktuArrival,
+          style: const TextStyle(fontSize: 11, fontFamily: 'JetBrains Mono'))),
+      DataCell(Text(realisasiData.waktuBerthing,
+          style: const TextStyle(fontSize: 11, fontFamily: 'JetBrains Mono'))),
+      DataCell(Text(realisasiData.waktuDeparture,
+          style: const TextStyle(fontSize: 11, fontFamily: 'JetBrains Mono'))),
+      DataCell(Text(realisasiData.berthingTime,
+          style: const TextStyle(fontSize: 11, fontFamily: 'JetBrains Mono'))),
+      DataCell(Text(realisasiData.realisasiBongkar.toString(),
+          style: const TextStyle(fontSize: 11, fontFamily: 'JetBrains Mono'))),
+      DataCell(Text(realisasiData.realisasiMuat.toString(),
+          style: const TextStyle(fontSize: 11, fontFamily: 'JetBrains Mono'))),
+      DataCell(Row(
+        children: [
+          InkWell(
+            onTap: onEdit,
+            child: const Text('Edit',
+                style: TextStyle(
+                    color: AppColors.secondary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600)),
+          ),
+          const SizedBox(width: 12),
+          InkWell(
+            onTap: onDelete,
             child: const Text('Hapus',
                 style: TextStyle(
                     color: AppColors.danger,
@@ -2272,10 +2937,12 @@ class _MainPageState extends State<MainPage> {
     required String hint,
     bool readOnly = false,
     TextInputType? keyboardType,
+    bool enabled = true,
   }) {
     return TextField(
       controller: controller,
       readOnly: readOnly,
+      enabled: enabled,
       keyboardType: keyboardType,
       style: const TextStyle(
         fontFamily: 'JetBrains Mono',
@@ -2307,7 +2974,7 @@ class _MainPageState extends State<MainPage> {
   Widget _buildDropdownField({
     required String value,
     required List<String> items,
-    required Function(String?) onChanged,
+    required Function(String?)? onChanged,
   }) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -2367,6 +3034,36 @@ class _MainPageState extends State<MainPage> {
         ),
       ),
     );
+  }
+
+  // Select Filter Date for Data Display
+  Future<void> _selectFilterDate() async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedFilterDate ?? _currentDateTime,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: const ColorScheme.dark(
+              primary: AppColors.secondary,
+              onPrimary: Colors.white,
+              surface: AppColors.bgCard,
+              onSurface: AppColors.textPrimary,
+            ),
+            dialogBackgroundColor: AppColors.bgCard,
+          ),
+          child: child!,
+        );
+      },
+    );
+
+    if (picked != null) {
+      setState(() {
+        _selectedFilterDate = picked;
+      });
+    }
   }
 
   Future<void> _selectDateTimeRealisasi(String type) async {
@@ -2760,6 +3457,98 @@ class _MainPageState extends State<MainPage> {
   Future<void> _exportTableToPDF() async {
     final pdf = pw.Document();
 
+    // Page 1: Target Data
+    List<pw.TableRow> targetRows = [
+      pw.TableRow(
+        children: [
+          pw.Padding(
+              padding: const pw.EdgeInsets.all(4),
+              child: pw.Text('NO',
+                  style: pw.TextStyle(
+                      fontWeight: pw.FontWeight.bold, fontSize: 9))),
+          pw.Padding(
+              padding: const pw.EdgeInsets.all(4),
+              child: pw.Text('PELAYARAN',
+                  style: pw.TextStyle(
+                      fontWeight: pw.FontWeight.bold, fontSize: 9))),
+          pw.Padding(
+              padding: const pw.EdgeInsets.all(4),
+              child: pw.Text('WS',
+                  style: pw.TextStyle(
+                      fontWeight: pw.FontWeight.bold, fontSize: 9))),
+          pw.Padding(
+              padding: const pw.EdgeInsets.all(4),
+              child: pw.Text('WEEK',
+                  style: pw.TextStyle(
+                      fontWeight: pw.FontWeight.bold, fontSize: 9))),
+          pw.Padding(
+              padding: const pw.EdgeInsets.all(4),
+              child: pw.Text('TB',
+                  style: pw.TextStyle(
+                      fontWeight: pw.FontWeight.bold, fontSize: 9))),
+          pw.Padding(
+              padding: const pw.EdgeInsets.all(4),
+              child: pw.Text('TD',
+                  style: pw.TextStyle(
+                      fontWeight: pw.FontWeight.bold, fontSize: 9))),
+          pw.Padding(
+              padding: const pw.EdgeInsets.all(4),
+              child: pw.Text('BT',
+                  style: pw.TextStyle(
+                      fontWeight: pw.FontWeight.bold, fontSize: 9))),
+          pw.Padding(
+              padding: const pw.EdgeInsets.all(4),
+              child: pw.Text('B/M',
+                  style: pw.TextStyle(
+                      fontWeight: pw.FontWeight.bold, fontSize: 9))),
+        ],
+      ),
+    ];
+
+    for (int i = 0; i < _targetDataList.length; i++) {
+      final data = _targetDataList[i];
+      final tbDate = DateTime.parse(data.waktuBerthing);
+      final tdDate = DateTime.parse(data.waktuDeparture);
+      targetRows.add(
+        pw.TableRow(
+          children: [
+            pw.Padding(
+                padding: const pw.EdgeInsets.all(4),
+                child: pw.Text('${i + 1}',
+                    style: const pw.TextStyle(fontSize: 8))),
+            pw.Padding(
+                padding: const pw.EdgeInsets.all(4),
+                child: pw.Text(data.pelayaran,
+                    style: const pw.TextStyle(fontSize: 8))),
+            pw.Padding(
+                padding: const pw.EdgeInsets.all(4),
+                child: pw.Text(data.kodeWS,
+                    style: const pw.TextStyle(fontSize: 8))),
+            pw.Padding(
+                padding: const pw.EdgeInsets.all(4),
+                child: pw.Text(data.periode,
+                    style: const pw.TextStyle(fontSize: 8))),
+            pw.Padding(
+                padding: const pw.EdgeInsets.all(4),
+                child: pw.Text(DateFormat('dd/MM HH:mm').format(tbDate),
+                    style: const pw.TextStyle(fontSize: 8))),
+            pw.Padding(
+                padding: const pw.EdgeInsets.all(4),
+                child: pw.Text(DateFormat('dd/MM HH:mm').format(tdDate),
+                    style: const pw.TextStyle(fontSize: 8))),
+            pw.Padding(
+                padding: const pw.EdgeInsets.all(4),
+                child: pw.Text(data.berthingTime,
+                    style: const pw.TextStyle(fontSize: 8))),
+            pw.Padding(
+                padding: const pw.EdgeInsets.all(4),
+                child: pw.Text('${data.targetBongkar}/${data.targetMuat}',
+                    style: const pw.TextStyle(fontSize: 8))),
+          ],
+        ),
+      );
+    }
+
     pdf.addPage(
       pw.Page(
         orientation: pw.PageOrientation.landscape,
@@ -2983,13 +3772,47 @@ class _MainPageState extends State<MainPage> {
 
   Future<void> _exportTableToExcel() async {
     var excelFile = excel_pkg.Excel.createExcel();
-    excel_pkg.Sheet sheetObject = excelFile['Sheet1'];
 
-    sheetObject.appendRow(['Riwayat Target dan Realisasi']);
-    sheetObject.appendRow(
-        ['Dicetak', DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now())]);
-    sheetObject.appendRow([]);
-    sheetObject.appendRow([
+    // Sheet 1: Data Target
+    excelFile.rename('Sheet1', 'Data Target');
+    excel_pkg.Sheet targetSheet = excelFile['Data Target'];
+
+    targetSheet.appendRow([
+      'Data Target - ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now())}'
+    ]);
+    targetSheet.appendRow([]);
+    targetSheet.appendRow(
+        ['NO', 'PELAYARAN', 'WS', 'WEEK', 'TB', 'TD', 'BT', 'TARGET (B/M)']);
+
+    for (int i = 0; i < _targetDataList.length; i++) {
+      final data = _targetDataList[i];
+      final tbDate = DateTime.parse(data.waktuBerthing);
+      final tdDate = DateTime.parse(data.waktuDeparture);
+      targetSheet.appendRow([
+        '${i + 1}',
+        data.pelayaran,
+        data.kodeWS,
+        data.periode,
+        DateFormat('dd/MM HH:mm').format(tbDate),
+        DateFormat('dd/MM HH:mm').format(tdDate),
+        data.berthingTime,
+        '${data.targetBongkar}/${data.targetMuat}',
+      ]);
+    }
+
+    // Sheet 2: Data Realisasi
+    // Delete sheet if it exists, then create fresh
+    if (excelFile.sheets.containsKey('Data Realisasi')) {
+      excelFile.delete('Data Realisasi');
+    }
+    excelFile['Data Realisasi'];
+    excel_pkg.Sheet realisasiSheet = excelFile['Data Realisasi'];
+
+    realisasiSheet.appendRow([
+      'Data Realisasi - ${DateFormat('dd/MM/yyyy HH:mm').format(DateTime.now())}'
+    ]);
+    realisasiSheet.appendRow([]);
+    realisasiSheet.appendRow([
       'NO',
       'PELAYARAN',
       'WS',
@@ -2999,60 +3822,34 @@ class _MainPageState extends State<MainPage> {
       'TB',
       'TD',
       'BT',
-      'TARGET (B/M)',
-      'REALISASI (B/M)',
-      'ACHIEVEMENT'
+      'REALISASI (B/M)'
     ]);
-    sheetObject.appendRow([
-      '1',
-      'MERATUS',
-      'MMTK',
-      'MERATUS BATAM',
-      '1',
-      '28/12 02:40',
-      '28/12 03:30',
-      '28/12 15:25',
-      '11:55',
-      '512 / 400',
-      '512 / 0',
-      '56%'
-    ]);
-    sheetObject.appendRow([
-      '2',
-      'MERATUS',
-      'MMTK',
-      'MERATUS LABUAN BAJO',
-      '2',
-      '04/01 11:10',
-      '04/01 12:23',
-      '05/01 11:42',
-      '23:19',
-      '512 / 500',
-      '401 / 512',
-      '90%'
-    ]);
-    sheetObject.appendRow([
-      '3',
-      'MERATUS',
-      'MMTK',
-      'MERATUS LARANTUKA',
-      '3',
-      '11/01 17:58',
-      '11/01 18:18',
-      '12/01 12:34',
-      '18:16',
-      '400 / 400',
-      '409 / 391',
-      '188%'
-    ]);
+
+    for (int i = 0; i < _realisasiDataList.length; i++) {
+      final data = _realisasiDataList[i];
+      final taDate = DateTime.parse(data.waktuArrival);
+      final tbDate = DateTime.parse(data.waktuBerthing);
+      final tdDate = DateTime.parse(data.waktuDeparture);
+      realisasiSheet.appendRow([
+        '${i + 1}',
+        data.pelayaran,
+        data.kodeWS,
+        data.namaKapal,
+        data.periode,
+        DateFormat('dd/MM HH:mm').format(taDate),
+        DateFormat('dd/MM HH:mm').format(tbDate),
+        DateFormat('dd/MM HH:mm').format(tdDate),
+        data.berthingTime,
+        '${data.realisasiBongkar}/${data.realisasiMuat}',
+      ]);
+    }
 
     var fileBytes = excelFile.encode();
     if (fileBytes != null) {
-      // Show success message
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text('Table exported to Excel successfully'),
+          content: Text('Data exported to Excel successfully'),
           backgroundColor: AppColors.success,
         ),
       );
@@ -3241,5 +4038,72 @@ class _MainPageState extends State<MainPage> {
         ),
       ],
     );
+  }
+
+  // ======================== LOCK LOGIC FOR TARGET FORM ========================
+  Future<void> _checkTargetFormLockStatus() async {
+    try {
+      // Get all target data sorted by waktuBerthing descending (latest first)
+      final allTargets = await _dbHelper.getAllTargetData();
+
+      if (allTargets.isEmpty) {
+        // No data yet, unlock form (first entry allowed)
+        setState(() {
+          _isTargetFormLocked = false;
+          _lockReason = '';
+        });
+        return;
+      }
+
+      // Sort by waktuBerthing to get the latest ship
+      allTargets.sort((a, b) {
+        DateTime dateA = DateTime.parse(a.waktuBerthing);
+        DateTime dateB = DateTime.parse(b.waktuBerthing);
+        return dateB.compareTo(dateA); // Descending
+      });
+
+      final latestTarget = allTargets.first;
+
+      // Check if latest target has realisasi data
+      final allRealisasi = await _dbHelper.getAllRealisasiData();
+      final hasRealisasi = allRealisasi.any((realisasi) =>
+          realisasi.pelayaran == latestTarget.pelayaran &&
+          realisasi.kodeWS == latestTarget.kodeWS &&
+          realisasi.periode == latestTarget.periode);
+
+      if (!hasRealisasi) {
+        // Latest ship doesn't have realisasi yet → LOCK
+        setState(() {
+          _isTargetFormLocked = true;
+          _lockReason =
+              'Kapal sebelumnya (${latestTarget.pelayaran} - ${latestTarget.kodeWS}) belum memiliki data realisasi. Harap selesaikan entry realisasi terlebih dahulu.';
+        });
+        return;
+      }
+
+      // Check if latest ship performed B/M (targetBongkar > 0 OR targetMuat > 0)
+      if (latestTarget.targetBongkar > 0 || latestTarget.targetMuat > 0) {
+        // Latest ship performed B/M → LOCK
+        setState(() {
+          _isTargetFormLocked = true;
+          _lockReason =
+              'Kapal sebelumnya (${latestTarget.pelayaran} - ${latestTarget.kodeWS}) masih melakukan bongkar/muat (${latestTarget.targetBongkar}/${latestTarget.targetMuat} TEUS). Entry target berikutnya belum diizinkan.';
+        });
+        return;
+      }
+
+      // Latest ship has realisasi AND doesn't perform B/M (0/0) → UNLOCK
+      setState(() {
+        _isTargetFormLocked = false;
+        _lockReason = '';
+      });
+    } catch (e) {
+      print('Error checking lock status: $e');
+      // On error, default to unlock to prevent blocking user
+      setState(() {
+        _isTargetFormLocked = false;
+        _lockReason = '';
+      });
+    }
   }
 }

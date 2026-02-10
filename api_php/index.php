@@ -12,16 +12,12 @@ $request = isset($_GET['request']) ? $_GET['request'] : '';
 
 // Route requests
 switch ($request) {
-    case 'evaluasi':
-        require_once 'endpoints/evaluasi.php';
+    case 'target_data':
+        require_once 'endpoints/target_data.php';
         break;
-        
-    case 'statistics':
-        require_once 'endpoints/statistics.php';
-        break;
-        
-    case 'search':
-        require_once 'endpoints/search.php';
+
+    case 'realisasi_data':
+        require_once 'endpoints/realisasi_data.php';
         break;
         
     case 'test':
@@ -34,13 +30,13 @@ switch ($request) {
     default:
         sendResponse(true, 'TPK Nilam Evaluasi WS API v' . API_VERSION, array(
             'endpoints' => array(
-                'GET /api/index.php?request=test' => 'Test API connection',
-                'GET /api/index.php?request=evaluasi' => 'Get all evaluasi data',
-                'POST /api/index.php?request=evaluasi' => 'Create new evaluasi',
-                'PUT /api/index.php?request=evaluasi&id={id}' => 'Update evaluasi',
-                'DELETE /api/index.php?request=evaluasi&id={id}' => 'Delete evaluasi',
-                'GET /api/index.php?request=statistics' => 'Get statistics',
-                'GET /api/index.php?request=search&q={query}' => 'Search evaluasi'
+                'GET /api_php/index.php?request=test' => 'Test API connection',
+                'GET /api_php/index.php?request=target_data' => 'Get all target data',
+                'POST /api_php/index.php?request=target_data' => 'Create new target',
+                'DELETE /api_php/index.php?request=target_data&id={id}' => 'Delete target',
+                'GET /api_php/index.php?request=realisasi_data' => 'Get all realisasi data',
+                'POST /api_php/index.php?request=realisasi_data' => 'Create new realisasi',
+                'DELETE /api_php/index.php?request=realisasi_data&id={id}' => 'Delete realisasi'
             )
         ));
         break;

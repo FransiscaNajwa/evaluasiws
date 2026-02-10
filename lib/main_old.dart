@@ -13,7 +13,7 @@ void main() async {
 }
 
 class TPKNilamApp extends StatelessWidget {
-  const TPKNilamApp({Key? key}) : super(key: key);
+  const TPKNilamApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -48,7 +48,7 @@ class AppColors {
 }
 
 class MainPage extends StatefulWidget {
-  const MainPage({Key? key}) : super(key: key);
+  const MainPage({super.key});
 
   @override
   State<MainPage> createState() => _MainPageState();
@@ -744,7 +744,7 @@ class _MainPageState extends State<MainPage>
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
+        gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [AppColors.bgCard, AppColors.bgLight],
@@ -1028,7 +1028,7 @@ class _MainPageState extends State<MainPage>
           drawVerticalLine: true,
           horizontalInterval: 100,
           getDrawingHorizontalLine: (value) {
-            return FlLine(
+            return const FlLine(
               color: AppColors.border,
               strokeWidth: 1,
             );
@@ -1432,12 +1432,12 @@ class _MainPageState extends State<MainPage>
                   : SingleChildScrollView(
                       scrollDirection: Axis.horizontal,
                       child: DataTable(
-                        headingRowColor: MaterialStateProperty.all(
+                        headingRowColor: WidgetStateProperty.all(
                           AppColors.bgLight.withOpacity(0.5),
                         ),
-                        dataRowColor: MaterialStateProperty.resolveWith<Color>(
-                          (Set<MaterialState> states) {
-                            if (states.contains(MaterialState.hovered)) {
+                        dataRowColor: WidgetStateProperty.resolveWith<Color>(
+                          (Set<WidgetState> states) {
+                            if (states.contains(WidgetState.hovered)) {
                               return AppColors.bgLight.withOpacity(0.3);
                             }
                             return Colors.transparent;

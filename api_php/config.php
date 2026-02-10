@@ -7,12 +7,12 @@
 // Database credentials
 define('DB_HOST', 'localhost');
 define('DB_USER', 'root');
-define('DB_PASS', ''); // Kosongkan jika tidak ada password
+define('DB_PASS', '');
 define('DB_NAME', 'evaluasiws');
 
 // API Settings
 define('API_VERSION', '1.0');
-define('API_KEY', 'TPK-NILAM-2026'); // Ganti dengan key yang aman
+define('API_KEY', 'TPK-NILAM-2026');
 
 // Timezone
 date_default_timezone_set('Asia/Jakarta');
@@ -86,8 +86,16 @@ function sendError($message, $code = 400) {
  * Validate API Key
  */
 function validateApiKey() {
-    $headers = getallheaders();
-    $apiKey = isset($headers['Authorization']) ? $headers['Authorization'] : '';
+    $headers = function_exists('getallheaders') ? getallheaders() : [];
+    $apiKey = '';
+
+    if (isset($headers['Authorization'])) {
+        $apiKey = $headers['Authorization'];
+    } elseif (isset($headers['authorization'])) {
+        $apiKey = $headers['authorization'];
+    } elseif (isset($_SERVER['HTTP_AUTHORIZATION'])) {
+        $apiKey = $_SERVER['HTTP_AUTHORIZATION'];
+    }
     
     if ($apiKey !== 'Bearer ' . API_KEY) {
         sendError('Invalid API Key', 401);

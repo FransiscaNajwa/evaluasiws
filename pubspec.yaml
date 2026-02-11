@@ -18,17 +18,6 @@ dependencies:
   # Date formatting
   intl: ^0.18.1
   
-  # Local Storage (replacing sqflite)
-  shared_preferences: ^2.2.0
-  
-  # Export PDF and Excel
-  pdf: ^3.10.0
-  printing: ^5.10.0
-  excel: ^2.1.0
-
-  # API
-  http: ^1.2.0
-  
   # Icons
   cupertino_icons: ^1.0.2
 
